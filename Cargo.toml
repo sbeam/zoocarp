@@ -1,0 +1,18 @@
+[package]
+name = "zoocarp"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+apca = "0.25.1"
+axum = "0.5.16"
+chrono = "0.4.22"
+dotenvy = "0.15.5"
+num-decimal = {version = "0.2.4", default-features = false, features = ["num-v04", "serde"]}
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.68"
+tokio = { version = "1.0", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
