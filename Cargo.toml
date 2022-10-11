@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 apca = "0.25.1"
 axum = "0.5.16"
+axum-macros = "0.2.3"
 chrono = "0.4.22"
 dotenvy = "0.15.5"
 num-decimal = {version = "0.2.4", default-features = false, features = ["num-v04", "serde"]}
@@ -16,3 +17,4 @@ serde_json = "1.0.68"
 tokio = { version = "1.0", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.2.1", features = ["v8", "v4"] }

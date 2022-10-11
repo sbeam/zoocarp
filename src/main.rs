@@ -1,11 +1,21 @@
-use axum::{extract::Query, http::StatusCode, response::IntoResponse, routing::get, Json, Router};
+use axum::{
+    extract::Query,
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{get, post},
+    Json, Router,
+};
+use axum_macros::debug_handler;
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 
+use apca::api::v2::order;
 use apca::data::v2::last_quote;
 // use apca::data::v2::Feed::IEX;
 use apca::ApiInfo;
 use apca::Client;
+use num_decimal::Num;
 // use apca::Error;
 
 use dotenvy::dotenv;
@@ -19,7 +29,8 @@ async fn main() {
     // build our application with a route
     let app = Router::new()
         .route("/", get(root))
-        .route("/latest", get(get_quote));
+        .route("/latest", get(get_quote))
+        .route("/order", post(place_order));
 
     // `axum::Server` is a re-export of `hyper::Server`
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
@@ -44,4 +55,35 @@ async fn get_quote(Query(params): Query<HashMap<String, String>>) -> impl IntoRe
     let sq = zoocarp::SerializableEntityQuote::from(quote);
 
     (StatusCode::OK, Json(sq))
+}
+
+#[debug_handler]
+async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoResponse {
+    let api_info = ApiInfo::from_env().unwrap();
+    let client = Client::new(api_info);
+
+    let request = order::OrderReqInit {
+        type_: order::Type::Limit,
+        limit_price: input.limit,
+        stop_price: input.stop,
+        ..Default::default()
+    }
+    .init(
+        input.sym,
+        order::Side::Buy,
+        order::Amount::quantity(input.qty),
+    );
+
+    let order = client.issue::<order::Post>(&request).await.unwrap();
+    tracing::debug!("Created order {}", order.id.as_hyphenated());
+
+    (StatusCode::OK, Json(order))
+}
+
+#[derive(Debug, Deserialize)]
+struct OrderPlacementInput {
+    sym: String,
+    qty: u32,
+    limit: Option<Num>,
+    stop: Option<Num>,
 }

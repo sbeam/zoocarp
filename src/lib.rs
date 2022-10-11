@@ -3,6 +3,10 @@ use chrono::DateTime;
 use chrono::Utc;
 use num_decimal::Num;
 use serde::Serialize;
+use uuid::Uuid;
+
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 /* This is needed because apca's Quote does not derive Serialize, and I'd like it to.
  * There might be a better way to do this, it feels very Java-like */
@@ -26,3 +30,32 @@ impl From<Quote> for SerializableEntityQuote {
         }
     }
 }
+
+#[derive(Debug, Serialize, Clone)]
+struct Position {
+    id: Uuid,
+    sym: String,
+    qty: u64,
+    opened: DateTime<Utc>,
+    filled_avg_price: Num,
+    buy_limit: Num,
+    target: Num,
+    placed: bool,
+}
+
+impl Default for Position {
+    fn default() -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            opened: Utc::now(),
+            placed: false,
+            qty: 0,
+            target: Num::new(0, 0),
+            filled_avg_price: Num::new(0, 0),
+            buy_limit: Num::new(0, 0),
+            sym: "".to_string(),
+        }
+    }
+}
+
+type Db = Arc<RwLock<HashMap<Uuid, Position>>>;

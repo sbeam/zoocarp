@@ -31,10 +31,10 @@ If closed
 
 # B/E
 
-  1. [ ] GET /quote?sym=AAPL => { last: 129.00, bid: 129.34, ask: 129.44 }
-  2. [ ] POST /monitor: symbol and period, add to list, then thread-stream live trades/quotes every period via w/s
-  3. [ ] POST /order: (per above)
-  4. [ ] GET /positions: List positions and order status via Alpaca (directly?)
+  1. [x] GET /quote?sym=AAPL => { last: 129.00, bid: 129.34, ask: 129.44 }
+  2. [ ] POST /order: (per above)
+  3. [ ] GET /positions: List positions and order status via Alpaca (directly?)
+  4. [ ] POST /monitor: symbol and period, add to list, then thread-stream live trades/quotes every period via w/s
   5. [ ] POST /watch: Strategy ID and symbol
 
 Algo trading is a crowded and technically advanced market. Don't try to implement TradeStation, UltraAlgo etc
