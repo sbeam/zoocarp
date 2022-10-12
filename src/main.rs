@@ -5,12 +5,11 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use axum_macros::debug_handler;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 
-use apca::api::v2::order;
+use apca::api::v2::{order, orders, positions};
 use apca::data::v2::last_quote;
 // use apca::data::v2::Feed::IEX;
 use apca::ApiInfo;
@@ -30,6 +29,8 @@ async fn main() {
     let app = Router::new()
         .route("/", get(root))
         .route("/latest", get(get_quote))
+        .route("/positions", get(get_positions))
+        .route("/orders", get(get_orders))
         .route("/order", post(place_order));
 
     // `axum::Server` is a re-export of `hyper::Server`
@@ -57,7 +58,28 @@ async fn get_quote(Query(params): Query<HashMap<String, String>>) -> impl IntoRe
     (StatusCode::OK, Json(sq))
 }
 
-#[debug_handler]
+async fn get_positions() -> impl IntoResponse {
+    let api_info = ApiInfo::from_env().unwrap();
+    let client = Client::new(api_info);
+
+    let positions = client.issue::<positions::Get>(&()).await.unwrap();
+
+    (StatusCode::OK, Json(positions))
+}
+
+async fn get_orders() -> impl IntoResponse {
+    let api_info = ApiInfo::from_env().unwrap();
+    let client = Client::new(api_info);
+
+    let request = orders::OrdersReq {
+        status: orders::Status::Open,
+        ..orders::OrdersReq::default()
+    };
+    let orders = client.issue::<orders::Get>(&request).await.unwrap();
+
+    (StatusCode::OK, Json(orders))
+}
+
 async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoResponse {
     let api_info = ApiInfo::from_env().unwrap();
     let client = Client::new(api_info);
