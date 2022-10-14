@@ -35,8 +35,9 @@ If closed
   2. [x] POST /order: (per above)
   3. [x] GET /positions: List positions via Alpaca (directly?)
   4. [x] GET /orders: List open orders via Alpaca (directly?)
-  5. [ ] POST /monitor: symbol and period, add to list, then thread-stream live trades/quotes every period via w/s
-  6. [ ] POST /watch: Strategy ID and symbol
+  5. [ ] PATCH /order: modify stop, target
+  6. [ ] POST /monitor: symbol and period, add to list, then thread-stream live trades/quotes every period via w/s
+  7. [ ] POST /watch: Strategy ID and symbol
 
 Algo trading is a crowded and technically advanced market. Don't try to implement TradeStation, UltraAlgo etc
 

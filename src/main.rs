@@ -34,7 +34,7 @@ async fn main() {
         .route("/order", post(place_order));
 
     // `axum::Server` is a re-export of `hyper::Server`
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    let addr = SocketAddr::from(([127, 0, 0, 1], 3001));
     tracing::debug!("listening on {}", addr);
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
@@ -72,10 +72,14 @@ async fn get_orders() -> impl IntoResponse {
     let client = Client::new(api_info);
 
     let request = orders::OrdersReq {
-        status: orders::Status::Open,
+        status: orders::Status::Closed, // <-- TODO also need Opens
         ..orders::OrdersReq::default()
     };
-    let orders = client.issue::<orders::Get>(&request).await.unwrap();
+    let alpaca_orders = client.issue::<orders::Get>(&request).await.unwrap();
+    let orders: Vec<zoocarp::Position> = alpaca_orders
+        .iter()
+        .map(|o| zoocarp::Position::from(o))
+        .collect();
 
     (StatusCode::OK, Json(orders))
 }
