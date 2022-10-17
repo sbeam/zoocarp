@@ -34,13 +34,14 @@ impl From<Quote> for SerializableEntityQuote {
 #[derive(Debug, Serialize, Clone)]
 pub struct Position {
     id: Uuid,
+    broker_id: Option<apca::api::v2::order::Id>,
     sym: String,
     status: Option<apca::api::v2::order::Status>,
     qty: Num,
     opened: DateTime<Utc>,
-    filled_avg_price: Num,
-    buy_limit: Num,
-    target: Num,
+    filled_avg_price: Option<Num>,
+    buy_limit: Option<Num>,
+    target: Option<Num>,
     placed: bool,
     cost_basis: Option<Num>,
 }
@@ -50,13 +51,14 @@ impl Default for Position {
         // this does nothing useful and should be removed?
         Self {
             id: Uuid::new_v4(),
+            broker_id: None,
             opened: Utc::now(),
             status: None,
             placed: false,
             qty: Num::from(0),
-            target: Num::from(0),
-            filled_avg_price: Num::from(0),
-            buy_limit: Num::from(0),
+            target: Some(Num::from(0)),
+            filled_avg_price: Some(Num::from(0)),
+            buy_limit: Some(Num::from(0)),
             sym: "".to_string(),
             cost_basis: None,
         }
@@ -67,6 +69,9 @@ impl From<&apca::api::v2::order::Order> for Position {
     fn from(order: &apca::api::v2::order::Order) -> Position {
         let qty = order.filled_quantity.clone();
 
+        // this would be much better as a method called on the Struct imo,
+        // but apparently the only way would be this, another wrapping layer
+        // of redundancy -> https://stackoverflow.com/questions/36159031/add-value-of-a-method-to-serde-serialization-output
         let cost_basis = if let Some(price) = &order.average_fill_price {
             Some(price * &qty)
         } else {
@@ -74,17 +79,16 @@ impl From<&apca::api::v2::order::Order> for Position {
         };
 
         Position {
+            broker_id: Some(order.id),
             status: Some(order.status),
+            placed: true,
+            buy_limit: order.limit_price.clone(),
+            sym: order.symbol.clone(),
+            filled_avg_price: order.average_fill_price.clone(),
             cost_basis,
             qty,
             ..Position::default()
         }
-    }
-}
-
-impl Position {
-    fn cost_basis(self) -> Num {
-        self.filled_avg_price * Num::from(self.qty)
     }
 }
 
