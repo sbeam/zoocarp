@@ -5,6 +5,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use futures::future;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -70,18 +71,31 @@ async fn get_positions() -> impl IntoResponse {
 async fn get_orders() -> impl IntoResponse {
     let api_info = ApiInfo::from_env().unwrap();
     let client = Client::new(api_info);
+    let statuses = [orders::Status::Closed, orders::Status::Open];
 
-    let request = orders::OrdersReq {
-        status: orders::Status::Closed, // <-- TODO also need Opens
-        ..orders::OrdersReq::default()
-    };
-    let alpaca_orders = client.issue::<orders::Get>(&request).await.unwrap();
-    let orders: Vec<zoocarp::Position> = alpaca_orders
-        .iter()
-        .map(|o| zoocarp::Position::from(o))
-        .collect();
+    // credit where due, after 1000 attempts to make 2 requests to API concurrent,
+    // this was the only way that worked https://stackoverflow.com/questions/51044467/how-can-i-perform-parallel-asynchronous-http-get-requests-with-reqwest
+    let reqs = future::join_all(statuses.into_iter().map(|status| {
+        let client = &client;
+        async move {
+            let request = orders::OrdersReq {
+                status,
+                ..orders::OrdersReq::default()
+            };
+            client.issue::<orders::Get>(&request).await.unwrap()
+        }
+    }))
+    .await;
 
-    (StatusCode::OK, Json(orders))
+    let mut positions: Vec<zoocarp::Position> = vec![];
+
+    for orders in reqs {
+        orders
+            .into_iter()
+            .for_each(|o| positions.push(zoocarp::Position::from(&o)))
+    }
+
+    (StatusCode::OK, Json(positions))
 }
 
 async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoResponse {

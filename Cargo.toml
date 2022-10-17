@@ -11,6 +11,8 @@ axum = "0.5.16"
 axum-macros = "0.2.3"
 chrono = "0.4.22"
 dotenvy = "0.15.5"
+futures = "0.3.24"
+http-endpoint = "0.5.0"
 num-decimal = {version = "0.2.4", default-features = false, features = ["num-v04", "serde"]}
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.68"
