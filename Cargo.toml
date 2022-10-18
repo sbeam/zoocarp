@@ -17,6 +17,7 @@ num-decimal = {version = "0.2.4", default-features = false, features = ["num-v04
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.68"
 tokio = { version = "1.0", features = ["full"] }
+tower-http = { version = "0.3.4", features = ["cors"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1.2.1", features = ["v8", "v4"] }

@@ -9,6 +9,7 @@ use futures::future;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use tower_http::cors::CorsLayer;
 
 use apca::api::v2::{order, orders, positions};
 use apca::data::v2::last_quote;
@@ -32,7 +33,8 @@ async fn main() {
         .route("/latest", get(get_quote))
         .route("/positions", get(get_positions))
         .route("/orders", get(get_orders))
-        .route("/order", post(place_order));
+        .route("/order", post(place_order))
+        .layer(CorsLayer::permissive());
 
     // `axum::Server` is a re-export of `hyper::Server`
     let addr = SocketAddr::from(([127, 0, 0, 1], 3001));
