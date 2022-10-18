@@ -23,7 +23,7 @@ use dotenvy::dotenv;
 #[tokio::main]
 async fn main() {
     dotenv().ok();
-    // initialize tracing
+    // initialize tracing, RUST_LOG=debug
     tracing_subscriber::fmt::init();
 
     // build our application with a route
@@ -90,10 +90,14 @@ async fn get_orders() -> impl IntoResponse {
     let mut positions: Vec<zoocarp::Position> = vec![];
 
     for orders in reqs {
+        tracing::debug!("{:?}", orders);
         orders
             .into_iter()
             .for_each(|o| positions.push(zoocarp::Position::from(&o)))
     }
+
+    // reverse sort orders by created_at
+    positions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
     (StatusCode::OK, Json(positions))
 }

@@ -3,10 +3,9 @@ use chrono::DateTime;
 use chrono::Utc;
 use num_decimal::Num;
 use serde::Serialize;
-use uuid::Uuid;
-
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use uuid::Uuid;
 
 /* This is needed because apca's Quote does not derive Serialize, and I'd like it to.
  * There might be a better way to do this, it feels very Java-like */
@@ -33,12 +32,12 @@ impl From<Quote> for SerializableEntityQuote {
 
 #[derive(Debug, Serialize, Clone)]
 pub struct Position {
+    pub created_at: DateTime<Utc>,
     id: Uuid,
     broker_id: Option<apca::api::v2::order::Id>,
     sym: String,
     status: Option<apca::api::v2::order::Status>,
     qty: Num,
-    opened: DateTime<Utc>,
     filled_avg_price: Option<Num>,
     buy_limit: Option<Num>,
     target: Option<Num>,
@@ -52,7 +51,7 @@ impl Default for Position {
         Self {
             id: Uuid::new_v4(),
             broker_id: None,
-            opened: Utc::now(),
+            created_at: Utc::now(),
             status: None,
             placed: false,
             qty: Num::from(0),
@@ -82,6 +81,7 @@ impl From<&apca::api::v2::order::Order> for Position {
             broker_id: Some(order.id),
             status: Some(order.status),
             placed: true,
+            created_at: order.created_at,
             buy_limit: order.limit_price.clone(),
             sym: order.symbol.clone(),
             filled_avg_price: order.average_fill_price.clone(),
