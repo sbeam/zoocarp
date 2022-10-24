@@ -76,6 +76,7 @@ async fn get_orders() -> impl IntoResponse {
 
     // credit where due, after 1000 attempts to make 2 requests to API concurrent,
     // this was the only way that worked https://stackoverflow.com/questions/51044467/how-can-i-perform-parallel-asynchronous-http-get-requests-with-reqwest
+    // TODO and not even necessary bc can just query orders::Status::All
     let reqs = future::join_all(statuses.into_iter().map(|status| {
         let client = &client;
         async move {
@@ -94,6 +95,14 @@ async fn get_orders() -> impl IntoResponse {
         tracing::debug!("{:?}", orders);
         orders
             .into_iter()
+            .filter(|order| {
+                [
+                    order::Status::New,
+                    order::Status::Filled,
+                    order::Status::PartiallyFilled,
+                ]
+                .contains(&order.status)
+            })
             .for_each(|o| positions.push(zoocarp::Position::from(&o)))
     }
 

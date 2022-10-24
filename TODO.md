@@ -39,6 +39,8 @@ If closed
   6. [ ] POST /monitor: symbol and period, add to list, then thread-stream live trades/quotes every period via w/s
   7. [ ] POST /watch: Strategy ID and symbol
 
+[ ] Bracket order impl https://alpaca.markets/docs/trading/orders/#bracket-orders
+
 [ ] Extend apca to get latest trade (not quote) https://alpaca.markets/docs/api-references/market-data-api/stock-pricing-data/historical/#latest-trade
 
 Algo trading is a crowded and technically advanced market. Don't try to implement TradeStation, UltraAlgo etc
