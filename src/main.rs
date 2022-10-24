@@ -12,7 +12,7 @@ use std::net::SocketAddr;
 use tower_http::cors::CorsLayer;
 
 use apca::api::v2::{order, orders, positions};
-use apca::data::v2::last_quote;
+use apca::data::v2::latest_trade;
 // use apca::data::v2::Feed::IEX;
 use apca::ApiInfo;
 use apca::Client;
@@ -30,7 +30,7 @@ async fn main() {
     // build our application with a route
     let app = Router::new()
         .route("/", get(root))
-        .route("/latest", get(get_quote))
+        .route("/latest", get(get_latest_trade))
         .route("/positions", get(get_positions))
         .route("/orders", get(get_orders))
         .route("/order", post(place_order))
@@ -50,15 +50,14 @@ async fn root() -> &'static str {
     "Cool app, hey, World!"
 }
 
-async fn get_quote(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+async fn get_latest_trade(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
     let api_info = ApiInfo::from_env().unwrap();
     let client = Client::new(api_info);
 
-    let req = last_quote::LastQuoteReqInit::default().init(params.get("sym").unwrap());
-    let quote = client.issue::<last_quote::Get>(&req).await.unwrap();
-    let sq = zoocarp::SerializableEntityQuote::from(quote);
+    let req = latest_trade::LatestTradeRequestInit::default().init(params.get("sym").unwrap());
+    let trade = client.issue::<latest_trade::Get>(&req).await.unwrap();
 
-    (StatusCode::OK, Json(sq))
+    (StatusCode::OK, Json(trade))
 }
 
 async fn get_positions() -> impl IntoResponse {

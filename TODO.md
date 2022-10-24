@@ -39,6 +39,8 @@ If closed
   6. [ ] POST /monitor: symbol and period, add to list, then thread-stream live trades/quotes every period via w/s
   7. [ ] POST /watch: Strategy ID and symbol
 
+[ ] Extend apca to get latest trade (not quote) https://alpaca.markets/docs/api-references/market-data-api/stock-pricing-data/historical/#latest-trade
+
 Algo trading is a crowded and technically advanced market. Don't try to implement TradeStation, UltraAlgo etc
 
 Focus: manual position entry and monitoring for long-term, family office etc,
@@ -55,12 +57,16 @@ Eventual: feed alerts and autofill input from 3rd party algo runners (somehow, d
 
 ## Crates
   * apca
-  * ta-rs
+  * [ta-rs](https://github.com/greyblake/ta-rs)
   * diesel
   * axum
 
-Example trade-bot: https://github.com/Nukeuler123/trade-bot/
+[Example trade-bot](https://github.com/Nukeuler123/trade-bot/)
 
 [Rust on Nails](https://rust-on-nails.com/): interesting, seems unfinished in
 RE to F/E, authentication, RBAC. But some interesting ideas.
+
+[Backend API w Rust on Postgres](https://blog.logrocket.com/create-backend-api-with-rust-postgres/)
+
+[Diesel ORM](https://diesel.rs/)
 

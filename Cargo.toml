@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-apca = "0.25.1"
+apca = { path = "../apca", version = "0.25.1" }
 axum = "0.5.16"
 axum-macros = "0.2.3"
 chrono = "0.4.22"

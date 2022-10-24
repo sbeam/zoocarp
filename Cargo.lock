@@ -29,8 +29,6 @@ dependencies = [
 [[package]]
 name = "apca"
 version = "0.25.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "929d603f0c01e09f377d86f249b7911fbc5b65a80b9aebc37ba905e758eea491"
 dependencies = [
  "async-compression",
  "async-trait",
