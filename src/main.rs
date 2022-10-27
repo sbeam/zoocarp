@@ -7,6 +7,7 @@ use axum::{
 };
 use futures::future;
 use serde::Deserialize;
+use serde_json::json;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use tower_http::cors::CorsLayer;
@@ -128,10 +129,18 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
         order::Amount::quantity(input.qty),
     );
 
-    let order = client.issue::<order::Post>(&request).await.unwrap();
+    let response = client.issue::<order::Post>(&request).await;
+    if response.is_err() {
+        let body = Json(json!({
+            "error": response.err().unwrap().to_string()
+        }));
+        return (StatusCode::BAD_REQUEST, body);
+    }
+    let order = response.unwrap();
+
     tracing::debug!("Created order {}", order.id.as_hyphenated());
 
-    (StatusCode::OK, Json(order))
+    (StatusCode::OK, Json(json!(order)))
 }
 
 #[derive(Debug, Deserialize)]
