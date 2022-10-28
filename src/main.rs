@@ -118,9 +118,11 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
     let client = Client::new(api_info);
 
     let request = order::OrderReqInit {
+        class: order::Class::Bracket,
         type_: order::Type::Limit,
         limit_price: input.limit,
-        stop_price: input.stop,
+        stop_loss: Some(order::StopLoss::Stop(input.stop.unwrap_or_default())),
+        take_profit: Some(order::TakeProfit::Limit(input.target.unwrap_or_default())),
         ..Default::default()
     }
     .init(
@@ -149,4 +151,5 @@ struct OrderPlacementInput {
     qty: u32,
     limit: Option<Num>,
     stop: Option<Num>,
+    target: Option<Num>,
 }
