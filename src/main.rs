@@ -117,6 +117,7 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
     let api_info = ApiInfo::from_env().unwrap();
     let client = Client::new(api_info);
 
+    // TODO bracket vs market order vs limit
     let request = order::OrderReqInit {
         class: order::Class::Bracket,
         type_: order::Type::Limit,

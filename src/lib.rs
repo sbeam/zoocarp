@@ -41,6 +41,7 @@ pub struct Position {
     filled_avg_price: Option<Num>,
     buy_limit: Option<Num>,
     target: Option<Num>,
+    stop: Option<Num>,
     placed: bool,
     cost_basis: Option<Num>,
 }
@@ -59,6 +60,7 @@ impl Default for Position {
             filled_avg_price: Some(Num::from(0)),
             buy_limit: Some(Num::from(0)),
             sym: "".to_string(),
+            stop: Some(Num::from(0)),
             cost_basis: None,
         }
     }
@@ -77,6 +79,28 @@ impl From<&apca::api::v2::order::Order> for Position {
             None
         };
 
+        let mut stop = None::<Num>;
+        let mut target = None::<Num>;
+
+        if &order.legs.len() > &0 {
+            stop = order
+                .legs
+                .clone()
+                .into_iter()
+                .filter(|leg| leg.type_ == apca::api::v2::order::Type::Stop)
+                .map(|leg| leg.stop_price)
+                .next()
+                .unwrap_or(None::<Num>);
+            target = order
+                .legs
+                .clone()
+                .into_iter()
+                .filter(|leg| leg.type_ == apca::api::v2::order::Type::Limit)
+                .map(|leg| leg.limit_price)
+                .next()
+                .unwrap_or(None::<Num>);
+        };
+
         Position {
             broker_id: Some(order.id),
             status: Some(order.status),
@@ -85,6 +109,8 @@ impl From<&apca::api::v2::order::Order> for Position {
             buy_limit: order.limit_price.clone(),
             sym: order.symbol.clone(),
             filled_avg_price: order.average_fill_price.clone(),
+            stop,
+            target,
             cost_basis,
             qty,
             ..Position::default()
