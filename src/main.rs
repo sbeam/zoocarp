@@ -56,7 +56,7 @@ async fn get_latest_trade(Query(params): Query<HashMap<String, String>>) -> impl
     let api_info = ApiInfo::from_env().unwrap();
     let client = Client::new(api_info);
 
-    let req = latest_trade::LatestTradeRequestInit::default().init(params.get("sym").unwrap());
+    let req = latest_trade::LatestTradeRequest::new(params.get("sym").unwrap());
     let trade = client.issue::<latest_trade::Get>(&req).await.unwrap();
 
     (StatusCode::OK, Json(trade))
@@ -66,11 +66,10 @@ async fn get_quote(Path(symbol): Path<String>) -> impl IntoResponse {
     let api_info = ApiInfo::from_env().unwrap();
     let client = Client::new(api_info);
 
-    let req = last_quote::LastQuoteReqInit::default().init(symbol.as_str());
-    let quote = client.issue::<last_quote::Get>(&req).await.unwrap();
-    let sq = zoocarp::SerializableEntityQuote::from(quote);
+    let req = last_quote::LastQuoteReq::new(symbol.as_str());
+    let quotes = client.issue::<last_quote::Get>(&req).await.unwrap();
 
-    (StatusCode::OK, Json(sq))
+    (StatusCode::OK, Json(quotes))
 }
 
 async fn get_positions() -> impl IntoResponse {

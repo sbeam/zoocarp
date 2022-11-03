@@ -72,3 +72,7 @@ RE to F/E, authentication, RBAC. But some interesting ideas.
 
 [Diesel ORM](https://diesel.rs/)
 
+## Rust
+
+https://blog.jcoglan.com/2019/04/22/generic-returns-in-rust/
+
