@@ -112,6 +112,7 @@ async fn get_orders() -> impl IntoResponse {
                 [
                     order::Status::New,
                     order::Status::Filled,
+                    order::Status::Accepted,
                     order::Status::PartiallyFilled,
                 ]
                 .contains(&order.status)
