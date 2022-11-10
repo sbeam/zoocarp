@@ -36,7 +36,7 @@ async fn main() {
         .route("/positions", get(get_positions))
         .route("/orders", get(get_orders))
         .route("/order", post(place_order))
-        .route("/order", patch(change_order))
+        .route("/liquidate", patch(liquidate_order))
         .layer(CorsLayer::permissive());
 
     // `axum::Server` is a re-export of `hyper::Server`
@@ -168,17 +168,15 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
 }
 
 #[derive(Debug, Deserialize)]
-struct OrderChangeInput {
-    qty: Option<u32>,
+struct OrderLiquidationInput {
     time_in_force: Option<order::TimeInForce>,
-    limit: Option<Num>,
     stop: Option<Num>,
-    target: Option<Num>,
-    trail: Option<Num>,
+    #[serde(rename = "orderType")]
+    type_: Option<order::Type>,
     id: order::Id,
 }
 
-async fn change_order(Json(input): Json<OrderChangeInput>) -> impl IntoResponse {
+async fn liquidate_order(Json(input): Json<OrderLiquidationInput>) -> impl IntoResponse {
     let api_info = ApiInfo::from_env().unwrap();
     let client = Client::new(api_info);
     let id = &input.id;
@@ -187,37 +185,34 @@ async fn change_order(Json(input): Json<OrderChangeInput>) -> impl IntoResponse 
     let get_order = client.issue::<order::Get>(&id).await;
 
     match get_order {
+        Err(e) => {
+            let body = Json(json!({
+                "error": e.to_string()
+            }));
+            (StatusCode::NOT_FOUND, body)
+        }
         Ok(retrieved) => {
             tracing::debug!("order found! {:?}", retrieved);
-
-            let qty = retrieved.filled_quantity.clone();
-
-            let leg = match retrieved.class {
-                order::Class::Bracket => retrieved
-                    .legs
-                    .clone()
-                    .into_iter()
-                    .filter(|leg| leg.type_ == apca::api::v2::order::Type::Stop)
-                    .next()
-                    .unwrap(),
-                _ => retrieved,
+            let type_ = input.type_.unwrap_or(order::Type::Market);
+            let stop_price = match type_ {
+                order::Type::Market => None,
+                _ => input.stop,
             };
 
-            let request = order::ChangeReqInit {
-                limit_price: input.limit,
-                time_in_force: input.time_in_force.unwrap_or(leg.time_in_force),
-                trail: input.trail,
-                stop_price: input.stop,
-                quantity: qty, // maybe should be able to adjust and then change self
-                // TODO not possibnle to modify?
-                // take_profit: Some(order::TakeProfit::Limit(input.target.unwrap_or_default())),
+            let reqt = order::OrderReqInit {
+                time_in_force: input.time_in_force.unwrap_or(order::TimeInForce::Day),
+                stop_price,
+                type_,
                 ..Default::default()
             }
-            .init();
-            tracing::debug!("req! {:?}", request);
+            .init(
+                retrieved.symbol,
+                order::Side::Sell,
+                order::Amount::quantity(retrieved.filled_quantity),
+            );
+            tracing::debug!("req! {:?}", reqt);
 
-            // FIXME: it's one of the legs we want to modify dammiut
-            let result = client.issue::<order::Patch>(&(leg.id, request)).await;
+            let result = client.issue::<order::Post>(&reqt).await;
             if result.is_err() {
                 tracing::debug!("bad! {:?}", result);
                 let e = result.err().unwrap();
@@ -229,18 +224,12 @@ async fn change_order(Json(input): Json<OrderChangeInput>) -> impl IntoResponse 
             let replaced = result.unwrap();
 
             tracing::debug!(
-                "Replaced order, old id {}, new id {}",
-                leg.id.as_hyphenated(),
+                "Deleted order {}, new Sell order {}",
+                retrieved.id.as_hyphenated(),
                 replaced.id.as_hyphenated()
             );
 
             (StatusCode::OK, Json(json!(replaced)))
-        }
-        Err(e) => {
-            let body = Json(json!({
-                "error": e.to_string()
-            }));
-            (StatusCode::NOT_FOUND, body)
         }
     }
 }
