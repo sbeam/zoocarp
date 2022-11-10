@@ -2,7 +2,7 @@ use axum::{
     extract::{Path, Query},
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{get, patch, post},
     Json, Router,
 };
 use futures::future;
@@ -36,6 +36,7 @@ async fn main() {
         .route("/positions", get(get_positions))
         .route("/orders", get(get_orders))
         .route("/order", post(place_order))
+        .route("/order", patch(change_order))
         .layer(CorsLayer::permissive());
 
     // `axum::Server` is a re-export of `hyper::Server`
@@ -124,6 +125,15 @@ async fn get_orders() -> impl IntoResponse {
     (StatusCode::OK, Json(positions))
 }
 
+#[derive(Debug, Deserialize)]
+struct OrderPlacementInput {
+    sym: String,
+    qty: u32,
+    limit: Option<Num>,
+    stop: Option<Num>,
+    target: Option<Num>,
+}
+
 async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoResponse {
     let api_info = ApiInfo::from_env().unwrap();
     let client = Client::new(api_info);
@@ -158,10 +168,79 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
 }
 
 #[derive(Debug, Deserialize)]
-struct OrderPlacementInput {
-    sym: String,
-    qty: u32,
+struct OrderChangeInput {
+    qty: Option<u32>,
+    time_in_force: Option<order::TimeInForce>,
     limit: Option<Num>,
     stop: Option<Num>,
     target: Option<Num>,
+    trail: Option<Num>,
+    id: order::Id,
+}
+
+async fn change_order(Json(input): Json<OrderChangeInput>) -> impl IntoResponse {
+    let api_info = ApiInfo::from_env().unwrap();
+    let client = Client::new(api_info);
+    let id = &input.id;
+    tracing::debug!("Fetching order with id {}", id.as_hyphenated());
+
+    let get_order = client.issue::<order::Get>(&id).await;
+
+    match get_order {
+        Ok(retrieved) => {
+            tracing::debug!("order found! {:?}", retrieved);
+
+            let qty = retrieved.filled_quantity.clone();
+
+            let leg = match retrieved.class {
+                order::Class::Bracket => retrieved
+                    .legs
+                    .clone()
+                    .into_iter()
+                    .filter(|leg| leg.type_ == apca::api::v2::order::Type::Stop)
+                    .next()
+                    .unwrap(),
+                _ => retrieved,
+            };
+
+            let request = order::ChangeReqInit {
+                limit_price: input.limit,
+                time_in_force: input.time_in_force.unwrap_or(leg.time_in_force),
+                trail: input.trail,
+                stop_price: input.stop,
+                quantity: qty, // maybe should be able to adjust and then change self
+                // TODO not possibnle to modify?
+                // take_profit: Some(order::TakeProfit::Limit(input.target.unwrap_or_default())),
+                ..Default::default()
+            }
+            .init();
+            tracing::debug!("req! {:?}", request);
+
+            // FIXME: it's one of the legs we want to modify dammiut
+            let result = client.issue::<order::Patch>(&(leg.id, request)).await;
+            if result.is_err() {
+                tracing::debug!("bad! {:?}", result);
+                let e = result.err().unwrap();
+                let body = Json(json!({
+                    "error": e.to_string()
+                }));
+                return (StatusCode::BAD_REQUEST, body);
+            }
+            let replaced = result.unwrap();
+
+            tracing::debug!(
+                "Replaced order, old id {}, new id {}",
+                leg.id.as_hyphenated(),
+                replaced.id.as_hyphenated()
+            );
+
+            (StatusCode::OK, Json(json!(replaced)))
+        }
+        Err(e) => {
+            let body = Json(json!({
+                "error": e.to_string()
+            }));
+            (StatusCode::NOT_FOUND, body)
+        }
+    }
 }
