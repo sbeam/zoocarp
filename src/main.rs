@@ -223,11 +223,26 @@ async fn liquidate_order(Json(input): Json<OrderLiquidationInput>) -> impl IntoR
             }
             let replaced = result.unwrap();
 
-            tracing::debug!(
-                "Deleted order {}, new Sell order {}",
-                retrieved.id.as_hyphenated(),
-                replaced.id.as_hyphenated()
-            );
+            // might want to use OCO but not clear on how to work it with a bracket order
+            if retrieved.legs.len() > 1 {
+                let open_legs = retrieved
+                    .legs
+                    .into_iter()
+                    .filter(|leg| !leg.status.is_terminal())
+                    .map(|leg| client.issue::<order::Delete>(&leg.id));
+                future::join_all(open_legs).await;
+            }
+
+            if retrieved.status.is_terminal() {
+                tracing::debug!("Base order already terminal");
+            } else {
+                client.issue::<order::Delete>(&retrieved.id).await.unwrap();
+                tracing::debug!(
+                    "Deleted order {}, new Sell order {}",
+                    retrieved.id.as_hyphenated(),
+                    replaced.id.as_hyphenated()
+                );
+            }
 
             (StatusCode::OK, Json(json!(replaced)))
         }
