@@ -7,6 +7,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
+type Db = Arc<RwLock<HashMap<Uuid, Position>>>;
+
 #[derive(Debug, Serialize, Clone)]
 pub struct Position {
     pub created_at: DateTime<Utc>,
@@ -94,5 +96,3 @@ impl From<&apca::api::v2::order::Order> for Position {
         }
     }
 }
-
-type Db = Arc<RwLock<HashMap<Uuid, Position>>>;

@@ -133,6 +133,7 @@ struct OrderPlacementInput {
     limit: Option<Num>,
     stop: Option<Num>,
     target: Option<Num>,
+    time_in_force: Option<order::TimeInForce>,
 }
 
 async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoResponse {
@@ -146,6 +147,9 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
         limit_price: input.limit,
         stop_loss: Some(order::StopLoss::Stop(input.stop.unwrap_or_default())),
         take_profit: Some(order::TakeProfit::Limit(input.target.unwrap_or_default())),
+        time_in_force: input
+            .time_in_force
+            .unwrap_or(order::TimeInForce::UntilCanceled),
         ..Default::default()
     }
     .init(
