@@ -34,7 +34,7 @@ async fn main() {
         .route("/latest", get(get_latest_trade))
         .route("/quote/:symbol", get(get_quote))
         .route("/positions", get(get_positions))
-        .route("/orders", get(get_orders))
+        .route("/orders", get(get_lots))
         .route("/order", post(place_order))
         .route("/liquidate", patch(liquidate_order))
         .layer(CorsLayer::permissive());
@@ -82,48 +82,21 @@ async fn get_positions() -> impl IntoResponse {
     (StatusCode::OK, Json(positions))
 }
 
-async fn get_orders() -> impl IntoResponse {
+async fn get_lots() -> impl IntoResponse {
+    let page = 0;
+    let limit = 50;
+    let lots = zoocarp::Lot::get_lots(page, limit).unwrap();
+    (StatusCode::OK, Json(lots))
+}
+
+fn alpaca_client() -> Client {
     let api_info = ApiInfo::from_env().unwrap();
-    let client = Client::new(api_info);
-    let statuses = [orders::Status::Closed, orders::Status::Open];
+    Client::new(api_info)
+}
 
-    // credit where due, after 1000 attempts to make 2 requests to API concurrent,
-    // this was the only way that worked https://stackoverflow.com/questions/51044467/how-can-i-perform-parallel-asynchronous-http-get-requests-with-reqwest
-    // TODO and not even necessary bc can just query orders::Status::All
-    let reqs = future::join_all(statuses.into_iter().map(|status| {
-        let client = &client;
-        async move {
-            let request = orders::OrdersReq {
-                status,
-                ..orders::OrdersReq::default()
-            };
-            client.issue::<orders::Get>(&request).await.unwrap()
-        }
-    }))
-    .await;
-
-    let mut positions: Vec<zoocarp::Position> = vec![];
-
-    for orders in reqs {
-        tracing::debug!("{:?}", orders);
-        orders
-            .into_iter()
-            .filter(|order| {
-                [
-                    order::Status::New,
-                    order::Status::Filled,
-                    order::Status::Accepted,
-                    order::Status::PartiallyFilled,
-                ]
-                .contains(&order.status)
-            })
-            .for_each(|o| positions.push(zoocarp::Position::from(&o)))
-    }
-
-    // reverse sort orders by created_at
-    positions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-
-    (StatusCode::OK, Json(positions))
+fn error_as_json(code: StatusCode, msg: String) -> (StatusCode, Json<serde_json::Value>) {
+    let body = json!({ "error": msg });
+    (code, Json(body))
 }
 
 #[derive(Debug, Deserialize)]
@@ -133,23 +106,33 @@ struct OrderPlacementInput {
     limit: Option<Num>,
     stop: Option<Num>,
     target: Option<Num>,
-    time_in_force: Option<order::TimeInForce>,
+    time_in_force: Option<zoocarp::OrderTimeInForce>,
 }
 
 async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoResponse {
-    let api_info = ApiInfo::from_env().unwrap();
-    let client = Client::new(api_info);
+    let lot_id = zoocarp::Lot::create(
+        input.sym.clone(),
+        Num::from(input.qty),
+        zoocarp::PositionType::Long,
+        input.limit.clone(),
+        input.target.clone(),
+        input.stop.clone(),
+        input.time_in_force,
+    );
 
+    tracing::debug!(">>> OK NEW LOT! id:{}", lot_id);
     // TODO bracket vs market order vs limit
     let request = order::OrderReqInit {
+        client_order_id: Some(lot_id.to_string()),
         class: order::Class::Bracket,
         type_: order::Type::Limit,
         limit_price: input.limit,
         stop_loss: Some(order::StopLoss::Stop(input.stop.unwrap_or_default())),
         take_profit: Some(order::TakeProfit::Limit(input.target.unwrap_or_default())),
-        time_in_force: input
-            .time_in_force
-            .unwrap_or(order::TimeInForce::UntilCanceled),
+        time_in_force: match input.time_in_force {
+            Some(zoocarp::OrderTimeInForce::Day) => order::TimeInForce::Day,
+            _ => order::TimeInForce::UntilCanceled,
+        },
         ..Default::default()
     }
     .init(
@@ -158,18 +141,22 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
         order::Amount::quantity(input.qty),
     );
 
-    let response = client.issue::<order::Post>(&request).await;
+    let response = alpaca_client().issue::<order::Post>(&request).await;
     if response.is_err() {
-        let body = Json(json!({
-            "error": response.err().unwrap().to_string()
-        }));
-        return (StatusCode::BAD_REQUEST, body);
+        return error_as_json(StatusCode::BAD_REQUEST, response.err().unwrap().to_string());
     }
     let order = response.unwrap();
-
     tracing::debug!("Created order {}", order.id.as_hyphenated());
 
-    (StatusCode::OK, Json(json!(order)))
+    let mut lot = zoocarp::Lot::get(lot_id).unwrap();
+
+    lot.fill_with(&order).unwrap();
+    tracing::debug!(
+        ">>> Lot and order sync! {:?} {:?}",
+        order.id.as_hyphenated(),
+        lot.rowid
+    );
+    (StatusCode::OK, Json(json!(lot)))
 }
 
 #[derive(Debug, Deserialize)]

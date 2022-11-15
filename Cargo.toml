@@ -20,4 +20,5 @@ tokio = { version = "1.0", features = ["full"] }
 tower-http = { version = "0.3.4", features = ["cors"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+turbosql = "0.7.0"
 uuid = { version = "1.2.1", features = ["v8", "v4"] }

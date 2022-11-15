@@ -72,6 +72,10 @@ RE to F/E, authentication, RBAC. But some interesting ideas.
 
 [Diesel ORM](https://diesel.rs/)
 
+[Turbosql](https://github.com/trevyn/turbosql)
+
+[Structsy](https://www.structsy.rs/)
+
 ## Rust
 
 https://blog.jcoglan.com/2019/04/22/generic-returns-in-rust/
