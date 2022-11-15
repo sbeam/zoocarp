@@ -86,6 +86,9 @@ async fn get_lots() -> impl IntoResponse {
     let page = 0;
     let limit = 50;
     let lots = zoocarp::Lot::get_lots(page, limit).unwrap();
+
+    // TODO fetch orders from alpaca and update lots
+    //
     (StatusCode::OK, Json(lots))
 }
 
@@ -120,7 +123,6 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
         input.time_in_force,
     );
 
-    tracing::debug!(">>> OK NEW LOT! id:{}", lot_id);
     // TODO bracket vs market order vs limit
     let request = order::OrderReqInit {
         client_order_id: Some(lot_id.to_string()),
@@ -153,7 +155,7 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
     lot.fill_with(&order).unwrap();
     tracing::debug!(
         ">>> Lot and order sync! {:?} {:?}",
-        order.id.as_hyphenated(),
+        order.id.as_hyphenated().to_string(),
         lot.rowid
     );
     (StatusCode::OK, Json(json!(lot)))
