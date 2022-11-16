@@ -13,7 +13,7 @@ use std::net::SocketAddr;
 use tower_http::cors::CorsLayer;
 
 use apca::api::v2::{order, orders, positions};
-use apca::data::v2::{last_quote, latest_trade};
+use apca::data::v2::{last_quote, last_trade};
 // use apca::data::v2::Feed::IEX;
 use apca::ApiInfo;
 use apca::Client;
@@ -31,7 +31,7 @@ async fn main() {
     // build our application with a route
     let app = Router::new()
         .route("/", get(root))
-        .route("/latest", get(get_latest_trade))
+        .route("/latest", get(get_last_trade))
         .route("/quote/:symbol", get(get_quote))
         .route("/positions", get(get_positions))
         .route("/orders", get(get_lots))
@@ -53,12 +53,19 @@ async fn root() -> &'static str {
     "Cool app, hey, World!"
 }
 
-async fn get_latest_trade(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+async fn get_last_trade(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
     let api_info = ApiInfo::from_env().unwrap();
     let client = Client::new(api_info);
 
-    let req = latest_trade::LatestTradeRequest::new(params.get("sym").unwrap());
-    let trade = client.issue::<latest_trade::Get>(&req).await.unwrap();
+    let req = last_trade::LastTradeRequest::new(
+        params
+            .get("sym")
+            .unwrap()
+            .split(",")
+            .map(|s| s.to_string()) // ug
+            .collect(),
+    );
+    let trade = client.issue::<last_trade::Get>(&req).await.unwrap();
 
     (StatusCode::OK, Json(trade))
 }
@@ -67,7 +74,7 @@ async fn get_quote(Path(symbol): Path<String>) -> impl IntoResponse {
     let api_info = ApiInfo::from_env().unwrap();
     let client = Client::new(api_info);
 
-    let req = last_quote::LastQuoteReq::new(symbol.as_str());
+    let req = last_quote::LastQuoteReq::new(vec![symbol]);
     let quotes = client.issue::<last_quote::Get>(&req).await.unwrap();
 
     (StatusCode::OK, Json(quotes))
@@ -87,8 +94,6 @@ async fn get_lots() -> impl IntoResponse {
     let limit = 50;
     let lots = zoocarp::Lot::get_lots(page, limit).unwrap();
 
-    // TODO fetch orders from alpaca and update lots
-    //
     (StatusCode::OK, Json(lots))
 }
 

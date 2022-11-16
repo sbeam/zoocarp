@@ -22,9 +22,9 @@ If closed
    - % g/li
    - slip %
 
-[ ] top row blank fields for sym, qty, limit, stop, target
+[x] top row blank fields for sym, qty, limit, stop, target
 [ ] exec button if pending
-[ ] liquidate if open
+[x] liquidate if open
 [ ] edit stop/target if open
 [ ] page results
 [ ] filter by date, symbol, etc
@@ -36,12 +36,23 @@ If closed
   3. [x] GET /positions: List positions via Alpaca (directly?)
   4. [x] GET /orders: List open orders via Alpaca (directly?)
   5. [ ] PATCH /order: modify stop, target
+  5. [x] PATCH /liquidate: cancel outstanding legs and enter a sell
   6. [ ] POST /monitor: symbol and period, add to list, then thread-stream live trades/quotes every period via w/s
   7. [ ] POST /watch: Strategy ID and symbol
 
-[ ] Bracket order impl https://alpaca.markets/docs/trading/orders/#bracket-orders
+[x] Bracket order impl https://alpaca.markets/docs/trading/orders/#bracket-orders
+[x] Extend apca to get latest trade (not quote) https://alpaca.markets/docs/api-references/market-data-api/stock-pricing-data/historical/#latest-trade
 
-[ ] Extend apca to get latest trade (not quote) https://alpaca.markets/docs/api-references/market-data-api/stock-pricing-data/historical/#latest-trade
+Place order wf:
+ 1. submit values
+ 2. create Lot
+ 3. send to Alpaca
+ 4. fill lot with order deets
+ 5. poll/ws for order updates (fuk!)
+
+on startup:
+ 1. fetch any non-finalized status orders and update Lots
+ 2. subscribe to order updates stream (and proxy!?)
 
 Algo trading is a crowded and technically advanced market. Don't try to implement TradeStation, UltraAlgo etc
 
