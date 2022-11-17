@@ -1,22 +1,33 @@
+mod sync_lots;
+
 use chrono::DateTime;
 use chrono::Utc;
 use num_decimal::Num;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
-use turbosql::{execute, select, Turbosql};
+use strum_macros;
+use turbosql::{select, Turbosql};
 
-/// The status a position can have.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-pub enum Status {
-    New,
-    Held,
+/// The status a lot can have.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, strum_macros::Display)]
+pub enum LotStatus {
+    /// The order is either awaiting execution or filled and is a held position.
+    Open,
+    /// The lot was sold or bought to cover and is final.
     Disposed,
+    /// The order was expired or canceled before it was filled.
+    Closed,
+    /// One of the other statuses, needs manual followup.
+    Other,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub enum DisposeReason {
+    /// The lot was manually disposed of.
     Liquidation,
+    /// The stop was hit.
     StopOut,
+    /// The take profit was hit.
     Profit,
 }
 
@@ -52,7 +63,7 @@ pub struct Lot {
     /// Long or Short
     pub position_type: Option<PositionType>,
     /// Whether the Lot is new, being held, or has been disposed
-    pub status: Option<Status>,
+    pub status: Option<LotStatus>,
     /// How long the order should remain active
     pub time_in_force: Option<OrderTimeInForce>,
     /// Average price of the lot per unit
@@ -64,23 +75,26 @@ pub struct Lot {
     /// Original stop loss price as entered by the user
     pub stop_price: Option<Num>,
     /// Total cost basis for the lot
-    cost_basis: Option<Num>,
+    pub cost_basis: Option<Num>,
     /// Time order was sold or covered.
     pub disposed_at: Option<DateTime<Utc>>,
     /// Price at which the lot was requested to be sold or covered.
-    disposed_stop_price: Option<Num>,
+    pub disposed_stop_price: Option<Num>,
     /// Average price at which the lot was actually sold or covered.
-    disposed_avg_price: Option<Num>,
+    pub disposed_avg_price: Option<Num>,
     /// Reason for disposal
-    dispose_reason: Option<DisposeReason>,
+    pub dispose_reason: Option<DisposeReason>,
+    /// The current status on the broker system, as of the last update
+    pub broker_status: Option<apca::api::v2::order::Status>,
     /// ID of the opening order in the broker system
-    open_order_id: Option<apca::api::v2::order::Id>,
+    pub open_order_id: Option<apca::api::v2::order::Id>,
     /// ID of the closing order in the broker system
-    disposing_order_id: Option<apca::api::v2::order::Id>,
+    pub disposing_order_id: Option<apca::api::v2::order::Id>,
     /// ID of the stop order in the broker system
-    stop_order_id: Option<apca::api::v2::order::Id>,
+    pub stop_order_id: Option<apca::api::v2::order::Id>,
     /// ID of the target order in the broker system
-    target_order_id: Option<apca::api::v2::order::Id>,
+    pub target_order_id: Option<apca::api::v2::order::Id>,
+    pub wtf_happen: Option<u32>,
 }
 
 impl Lot {
@@ -98,7 +112,7 @@ impl Lot {
             sym: Some(sym),
             qty: Some(qty),
             position_type: Some(position_type),
-            status: Some(Status::New),
+            status: Some(LotStatus::Open),
             time_in_force,
             limit_price,
             target_price,
@@ -122,11 +136,7 @@ impl Lot {
         self.open_order_id = Some(order.id);
         self.limit_price = order.limit_price.clone();
         self.filled_avg_price = order.average_fill_price.clone();
-        self.cost_basis = if let Some(price) = &order.average_fill_price {
-            Some(price * &qty)
-        } else {
-            None
-        };
+        self.set_cost_basis(&qty, &order.average_fill_price);
 
         if &order.legs.len() > &0 {
             let stop_order = order
@@ -145,17 +155,31 @@ impl Lot {
                 .next();
             self.target_order_id = Some(target_order.unwrap().id);
         };
-        self.status = match order.status {
-            apca::api::v2::order::Status::New => Some(Status::New),
-            apca::api::v2::order::Status::PartiallyFilled => Some(Status::Held),
-            apca::api::v2::order::Status::Filled => Some(Status::Held),
-            apca::api::v2::order::Status::Canceled => Some(Status::Disposed),
-            apca::api::v2::order::Status::Rejected => Some(Status::Disposed),
-            apca::api::v2::order::Status::Expired => Some(Status::Disposed),
-            _ => None,
-        };
+        self.set_status_from(&order.status);
         self.update()?;
         Ok(self)
+    }
+
+    pub fn set_cost_basis(&mut self, qty: &Num, fill_price: &Option<Num>) {
+        self.cost_basis = if let Some(price) = fill_price {
+            Some(price * qty)
+        } else {
+            None
+        };
+    }
+
+    pub fn set_status_from(&mut self, status: &apca::api::v2::order::Status) {
+        self.broker_status = Some(status.clone());
+        self.status = match status {
+            apca::api::v2::order::Status::New
+            | apca::api::v2::order::Status::PartiallyFilled
+            | apca::api::v2::order::Status::Filled => Some(LotStatus::Open),
+            apca::api::v2::order::Status::Canceled
+            | apca::api::v2::order::Status::Rejected
+            | apca::api::v2::order::Status::Expired => Some(LotStatus::Closed),
+            _ => Some(LotStatus::Other), // this should never happen so going to flag these for
+                                         // manual followup
+        }
     }
 
     pub fn get_lots(page: i64, limit: i64) -> Result<Vec<Lot>, Box<dyn Error>> {

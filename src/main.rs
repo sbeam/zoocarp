@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use tower_http::cors::CorsLayer;
 
-use apca::api::v2::{order, orders, positions};
+use apca::api::v2::{order, positions};
 use apca::data::v2::{last_quote, last_trade};
 // use apca::data::v2::Feed::IEX;
 use apca::ApiInfo;
@@ -22,11 +22,19 @@ use num_decimal::Num;
 
 use dotenvy::dotenv;
 
+mod sync_lots;
+use sync_lots::startup_sync;
+
+use zoocarp::*;
+
 #[tokio::main]
 async fn main() {
     dotenv().ok();
     // initialize tracing, RUST_LOG=debug
     tracing_subscriber::fmt::init();
+
+    // Updates status/pricing of any non-final orders via API
+    startup_sync().await.unwrap();
 
     // build our application with a route
     let app = Router::new()
@@ -90,9 +98,11 @@ async fn get_positions() -> impl IntoResponse {
 }
 
 async fn get_lots() -> impl IntoResponse {
-    let page = 0;
+    let page = 0; // TODO: pagination
     let limit = 50;
-    let lots = zoocarp::Lot::get_lots(page, limit).unwrap();
+    // TODO - filter by status (open, closed, all)
+    let lots = Lot::get_lots(page, limit).unwrap();
+    tracing::debug!("lots: {:?}", lots.len());
 
     (StatusCode::OK, Json(lots))
 }
@@ -118,7 +128,7 @@ struct OrderPlacementInput {
 }
 
 async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoResponse {
-    let lot_id = zoocarp::Lot::create(
+    let lot_id = Lot::create(
         input.sym.clone(),
         Num::from(input.qty),
         zoocarp::PositionType::Long,
@@ -155,7 +165,7 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
     let order = response.unwrap();
     tracing::debug!("Created order {}", order.id.as_hyphenated());
 
-    let mut lot = zoocarp::Lot::get(lot_id).unwrap();
+    let mut lot = Lot::get(lot_id).unwrap();
 
     lot.fill_with(&order).unwrap();
     tracing::debug!(
