@@ -9,7 +9,7 @@ use crate::{Lot, LotStatus};
 pub async fn startup_sync() -> Result<(), Box<dyn Error>> {
     let api_info = ApiInfo::from_env().unwrap();
     let client = Client::new(api_info);
-    let open_lots = select!(Vec<Lot> "WHERE status != ?", LotStatus::Closed.to_string())?;
+    let open_lots = select!(Vec<Lot> "WHERE status != ?", LotStatus::Closed).unwrap_or_default();
     tracing::info!("Syncing {} open lots", open_lots.len());
 
     join_all(open_lots.iter().map(|lot| {

@@ -5,11 +5,11 @@ use chrono::Utc;
 use num_decimal::Num;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
-use strum_macros;
-use turbosql::{select, Turbosql};
+use std::fmt::{Display, Formatter};
+use turbosql::{execute, select, ToSql, ToSqlOutput, Turbosql};
 
 /// The status a lot can have.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, strum_macros::Display)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub enum LotStatus {
     /// The order is either awaiting execution or filled and is a held position.
     Open,
@@ -19,6 +19,15 @@ pub enum LotStatus {
     Closed,
     /// One of the other statuses, needs manual followup.
     Other,
+}
+
+/// needs to be implemented for any enum that is used in `select!` macro params.
+// Need to make this a derive macro, but I've already spent way too much time on this, and sqlite
+// is temporary anyway.
+impl ToSql for LotStatus {
+    fn to_sql(&self) -> Result<ToSqlOutput<'_>, turbosql::rusqlite::Error> {
+        Ok(ToSqlOutput::from(serde_json::json!(self).to_string()))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
@@ -185,10 +194,52 @@ impl Lot {
     pub fn get_lots(page: i64, limit: i64) -> Result<Vec<Lot>, Box<dyn Error>> {
         let lots = select!(
             Vec<Lot>
-            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            "WHERE status = '\"Open\"' ORDER BY created_at DESC LIMIT ? OFFSET ?",
             limit,
             page * limit
         )?;
         Ok(lots)
     }
+}
+
+#[cfg(test)]
+fn build_lot_for_test() -> Lot {
+    Lot {
+        created_at: Some(Utc::now()),
+        sym: Some("TEST".to_string()),
+        qty: Some(Num::from(1)),
+        position_type: Some(PositionType::Long),
+        status: Some(LotStatus::Open),
+        time_in_force: Some(OrderTimeInForce::Day),
+        limit_price: Some(Num::from(1)),
+        target_price: Some(Num::from(1)),
+        stop_price: Some(Num::from(1)),
+        ..Default::default()
+    }
+}
+
+#[cfg(test)]
+fn setup() {
+    let res = std::panic::catch_unwind(|| execute!("DELETE FROM lot").unwrap());
+}
+
+// this really tests that turbosql is working, but there were ... <issues> ... with the enum.
+#[test]
+fn test_lot_can_be_saved_and_fetched() {
+    setup();
+    let lot = build_lot_for_test();
+    let rowid = lot.insert().unwrap();
+    assert!(rowid > 0);
+    let lot = Lot::get(rowid).unwrap();
+    assert_eq!(lot.sym.unwrap(), "TEST");
+    assert_eq!(lot.status.unwrap(), LotStatus::Open);
+
+    let mut lot2 = build_lot_for_test();
+    lot2.status = Some(LotStatus::Closed);
+    let rowid = lot2.insert().unwrap();
+    assert!(rowid > 1);
+
+    let lots = select!(Vec<Lot> "WHERE status = ?", LotStatus::Open).unwrap();
+
+    assert_eq!(lots.len(), 1);
 }
