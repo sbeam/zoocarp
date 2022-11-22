@@ -5,7 +5,6 @@ use chrono::Utc;
 use num_decimal::Num;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
-use std::fmt::{Display, Formatter};
 use turbosql::{execute, select, ToSql, ToSqlOutput, Turbosql};
 
 /// The status a lot can have.
@@ -181,6 +180,7 @@ impl Lot {
         self.broker_status = Some(status.clone());
         self.status = match status {
             apca::api::v2::order::Status::New
+            | apca::api::v2::order::Status::PendingNew
             | apca::api::v2::order::Status::PartiallyFilled
             | apca::api::v2::order::Status::Filled => Some(LotStatus::Open),
             apca::api::v2::order::Status::Canceled
@@ -194,7 +194,8 @@ impl Lot {
     pub fn get_lots(page: i64, limit: i64) -> Result<Vec<Lot>, Box<dyn Error>> {
         let lots = select!(
             Vec<Lot>
-            "WHERE status = '\"Open\"' ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            "WHERE status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            LotStatus::Open,
             limit,
             page * limit
         )?;
@@ -220,7 +221,7 @@ fn build_lot_for_test() -> Lot {
 
 #[cfg(test)]
 fn setup() {
-    let res = std::panic::catch_unwind(|| execute!("DELETE FROM lot").unwrap());
+    let _res = std::panic::catch_unwind(|| execute!("DELETE FROM lot").unwrap());
 }
 
 // this really tests that turbosql is working, but there were ... <issues> ... with the enum.
