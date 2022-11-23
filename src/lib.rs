@@ -10,12 +10,14 @@ use turbosql::{execute, select, ToSql, ToSqlOutput, Turbosql};
 /// The status a lot can have.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub enum LotStatus {
+    /// The order is awaiting fulfillment or partial fullfillment.
+    Pending,
     /// The order is either awaiting execution or filled and is a held position.
     Open,
     /// The lot was sold or bought to cover and is final.
     Disposed,
-    /// The order was expired or canceled before it was filled.
-    Closed,
+    /// The order expired or was canceled before it was filled.
+    Canceled,
     /// One of the other statuses, needs manual followup.
     Other,
 }
@@ -102,7 +104,6 @@ pub struct Lot {
     pub stop_order_id: Option<apca::api::v2::order::Id>,
     /// ID of the target order in the broker system
     pub target_order_id: Option<apca::api::v2::order::Id>,
-    pub wtf_happen: Option<u32>,
 }
 
 impl Lot {
@@ -179,13 +180,14 @@ impl Lot {
     pub fn set_status_from(&mut self, status: &apca::api::v2::order::Status) {
         self.broker_status = Some(status.clone());
         self.status = match status {
-            apca::api::v2::order::Status::New
-            | apca::api::v2::order::Status::PendingNew
-            | apca::api::v2::order::Status::PartiallyFilled
+            apca::api::v2::order::Status::New | apca::api::v2::order::Status::PendingNew => {
+                Some(LotStatus::Pending)
+            }
+            apca::api::v2::order::Status::PartiallyFilled
             | apca::api::v2::order::Status::Filled => Some(LotStatus::Open),
             apca::api::v2::order::Status::Canceled
             | apca::api::v2::order::Status::Rejected
-            | apca::api::v2::order::Status::Expired => Some(LotStatus::Closed),
+            | apca::api::v2::order::Status::Expired => Some(LotStatus::Canceled),
             _ => Some(LotStatus::Other), // this should never happen so going to flag these for
                                          // manual followup
         }
@@ -194,8 +196,9 @@ impl Lot {
     pub fn get_lots(page: i64, limit: i64) -> Result<Vec<Lot>, Box<dyn Error>> {
         let lots = select!(
             Vec<Lot>
-            "WHERE status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            "WHERE status = ? OR status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
             LotStatus::Open,
+            LotStatus::Pending,
             limit,
             page * limit
         )?;
@@ -236,7 +239,7 @@ fn test_lot_can_be_saved_and_fetched() {
     assert_eq!(lot.status.unwrap(), LotStatus::Open);
 
     let mut lot2 = build_lot_for_test();
-    lot2.status = Some(LotStatus::Closed);
+    lot2.status = Some(LotStatus::Canceled);
     let rowid = lot2.insert().unwrap();
     assert!(rowid > 1);
 
