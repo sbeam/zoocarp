@@ -6,6 +6,7 @@ use num_decimal::Num;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use turbosql::{execute, select, ToSql, ToSqlOutput, Turbosql};
+use uuid::Uuid;
 
 /// The status a lot can have.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
@@ -64,6 +65,8 @@ pub enum OrderTimeInForce {
 pub struct Lot {
     /// DB row ID
     pub rowid: Option<i64>,
+    /// Our local ID for the lot.
+    pub client_id: Option<String>,
     /// Time original order was submitted.
     pub created_at: Option<DateTime<Utc>>,
     /// Symbol of the position
@@ -118,6 +121,7 @@ impl Lot {
     ) -> i64 {
         let lot = Self {
             created_at: Some(Utc::now()),
+            client_id: Uuid::new_v4().to_string().into(),
             sym: Some(sym),
             qty: Some(qty),
             position_type: Some(position_type),
@@ -180,9 +184,9 @@ impl Lot {
     pub fn set_status_from(&mut self, status: &apca::api::v2::order::Status) {
         self.broker_status = Some(status.clone());
         self.status = match status {
-            apca::api::v2::order::Status::New | apca::api::v2::order::Status::PendingNew => {
-                Some(LotStatus::Pending)
-            }
+            apca::api::v2::order::Status::New
+            | apca::api::v2::order::Status::PendingNew
+            | apca::api::v2::order::Status::Accepted => Some(LotStatus::Pending),
             apca::api::v2::order::Status::PartiallyFilled
             | apca::api::v2::order::Status::Filled => Some(LotStatus::Open),
             apca::api::v2::order::Status::Canceled

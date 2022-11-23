@@ -138,12 +138,15 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
         input.time_in_force,
     );
 
+    let mut lot = Lot::get(lot_id).unwrap();
+
     // TODO bracket vs market order vs limit
     let request = order::OrderReqInit {
-        client_order_id: Some(lot_id.to_string()),
+        client_order_id: lot.client_id.clone(),
         class: order::Class::Bracket,
         type_: order::Type::Limit,
         limit_price: input.limit,
+        // extended_hours: true, // TODO make it an input
         stop_loss: Some(order::StopLoss::Stop(input.stop.unwrap_or_default())),
         take_profit: Some(order::TakeProfit::Limit(input.target.unwrap_or_default())),
         time_in_force: match input.time_in_force {
@@ -164,8 +167,6 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
     }
     let order = response.unwrap();
     tracing::debug!("Created order {}", order.id.as_hyphenated());
-
-    let mut lot = Lot::get(lot_id).unwrap();
 
     lot.fill_with(&order).unwrap();
     tracing::debug!(

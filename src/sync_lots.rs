@@ -10,7 +10,7 @@ pub async fn startup_sync() -> Result<(), Box<dyn Error>> {
     let api_info = ApiInfo::from_env().unwrap();
     let client = Client::new(api_info);
     let open_lots = select!(
-        Vec<Lot> "WHERE status != ? AND status != ?",
+        Vec<Lot> "WHERE status != ? AND status != ? AND client_id IS NOT NULL",
         LotStatus::Canceled,
         LotStatus::Disposed
     )
@@ -22,7 +22,7 @@ pub async fn startup_sync() -> Result<(), Box<dyn Error>> {
 
         async {
             let alpaca_order = client
-                .issue::<order::GetByClientId>(&lot.rowid.unwrap().to_string())
+                .issue::<order::GetByClientId>(&lot.client_id.as_ref().unwrap().clone())
                 .await;
             match alpaca_order {
                 Ok(order) => {
