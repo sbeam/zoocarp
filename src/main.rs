@@ -2,7 +2,7 @@ use axum::{
     extract::{Path, Query},
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, patch, post},
+    routing::*,
     Json, Router,
 };
 use futures::future;
@@ -44,6 +44,7 @@ async fn main() {
         .route("/positions", get(get_positions))
         .route("/orders", get(get_lots))
         .route("/order", post(place_order))
+        .route("/order/:id", delete(cancel_order))
         .route("/liquidate", patch(liquidate_order))
         .layer(CorsLayer::permissive());
 
@@ -112,7 +113,7 @@ fn alpaca_client() -> Client {
     Client::new(api_info)
 }
 
-fn error_as_json(code: StatusCode, msg: String) -> (StatusCode, Json<serde_json::Value>) {
+fn error_as_json(code: StatusCode, msg: &str) -> (StatusCode, Json<serde_json::Value>) {
     let body = json!({ "error": msg });
     (code, Json(body))
 }
@@ -163,7 +164,10 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
 
     let response = alpaca_client().issue::<order::Post>(&request).await;
     if response.is_err() {
-        return error_as_json(StatusCode::BAD_REQUEST, response.err().unwrap().to_string());
+        return error_as_json(
+            StatusCode::BAD_REQUEST,
+            &response.err().unwrap().to_string(),
+        );
     }
     let order = response.unwrap();
     tracing::debug!("Created order {}", order.id.as_hyphenated());
@@ -255,6 +259,24 @@ async fn liquidate_order(Json(input): Json<OrderLiquidationInput>) -> impl IntoR
             }
 
             (StatusCode::OK, Json(json!(replaced)))
+        }
+    }
+}
+
+async fn cancel_order(Path(client_id): Path<String>) -> impl IntoResponse {
+    let lot = Lot::get_by_client_id(&client_id).unwrap();
+    if lot.status != Some(LotStatus::Pending) || lot.open_order_id.is_none() {
+        return error_as_json(StatusCode::BAD_REQUEST, "Lot cannot be cancelled");
+    }
+
+    let response = alpaca_client()
+        .issue::<order::Delete>(&lot.open_order_id.unwrap())
+        .await;
+    match response {
+        Err(e) => error_as_json(StatusCode::BAD_REQUEST, &e.to_string()),
+        Ok(_) => {
+            // lot.cancel().unwrap();
+            (StatusCode::OK, Json(json!(lot)))
         }
     }
 }

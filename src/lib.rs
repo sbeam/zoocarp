@@ -140,6 +140,11 @@ impl Lot {
         Ok(lot)
     }
 
+    pub fn get_by_client_id(id: &str) -> Result<Self, Box<dyn Error>> {
+        let lot = select!(Lot "WHERE client_id = ?", id)?;
+        Ok(lot)
+    }
+
     pub fn fill_with(
         &mut self,
         order: &apca::api::v2::order::Order,
