@@ -23,7 +23,7 @@ use num_decimal::Num;
 
 use dotenvy::dotenv;
 
-mod sync_lots;
+pub mod sync_lots;
 use sync_lots::*;
 
 use zoocarp::*;

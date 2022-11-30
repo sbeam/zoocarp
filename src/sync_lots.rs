@@ -1,8 +1,6 @@
 use apca::api::v2::order;
 use apca::{ApiInfo, Client};
-use chrono::{DateTime, Utc};
 use futures::future::join_all;
-use num_decimal::Num;
 use serde::Deserialize;
 use std::error::Error;
 use turbosql::{select, Turbosql};
@@ -18,10 +16,10 @@ struct TradeUpdateMessageRoot {
 #[derive(Deserialize)]
 struct TradeUpdateMessageData {
     event: Event,
-    execution_id: String,
-    timestamp: DateTime<Utc>,
-    price: Num,
-    qty: u32,
+    // execution_id: String,
+    // timestamp: DateTime<Utc>,
+    // price: Num,
+    // qty: u32,
     order: order::Order,
 }
 

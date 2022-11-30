@@ -1,11 +1,11 @@
-mod sync_lots;
+pub mod sync_lots;
 
 use chrono::DateTime;
 use chrono::Utc;
 use num_decimal::Num;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
-use turbosql::{execute, select, ToSql, ToSqlOutput, Turbosql};
+use turbosql::{select, ToSql, ToSqlOutput, Turbosql};
 use uuid::Uuid;
 
 /// The status a lot can have.
@@ -125,7 +125,7 @@ impl Lot {
             sym: Some(sym),
             qty: Some(qty),
             position_type: Some(position_type),
-            status: Some(LotStatus::Open),
+            status: Some(LotStatus::Pending),
             time_in_force,
             limit_price,
             target_price,
@@ -212,21 +212,5 @@ impl Lot {
             page * limit
         )?;
         Ok(lots)
-    }
-
-    pub fn default_for_test() -> Self {
-        Self {
-            created_at: Some(Utc::now()),
-            client_id: Uuid::new_v4().to_string().into(),
-            sym: Some("TEST".into()),
-            qty: Some(Num::from(1)),
-            position_type: Some(PositionType::Long),
-            status: Some(LotStatus::Open),
-            time_in_force: Some(OrderTimeInForce::Day),
-            limit_price: Some(Num::from(1)),
-            target_price: Some(Num::from(1)),
-            stop_price: Some(Num::from(1)),
-            ..Default::default()
-        }
     }
 }
