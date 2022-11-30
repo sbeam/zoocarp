@@ -12,7 +12,6 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use tower_http::cors::CorsLayer;
 use tungstenite::{connect, Message};
-use url::Url;
 
 use apca::api::v2::{order, positions};
 use apca::data::v2::{last_quote, last_trade};
@@ -38,6 +37,9 @@ async fn main() {
     // Updates status/pricing of any non-final orders via API
     startup_sync().await.unwrap();
 
+    // Subscribe to trade_updates
+    listen_for_trade_updates();
+
     // build our application with a route
     let app = Router::new()
         .route("/", get(root))
@@ -50,8 +52,17 @@ async fn main() {
         .route("/liquidate", patch(liquidate_order))
         .layer(CorsLayer::permissive());
 
+    // `axum::Server` is a re-export of `hyper::Server`
+    let addr = SocketAddr::from(([127, 0, 0, 1], 3001));
+    tracing::debug!("listening on {}", addr);
+    axum::Server::bind(&addr)
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
+}
+
+fn listen_for_trade_updates() {
     let api_info = ApiInfo::from_env().unwrap();
-    tracing::debug!("{:?}", api_info);
 
     let mut url = api_info.data_stream_base_url;
     url.set_path("/stream");
@@ -87,25 +98,24 @@ async fn main() {
             }
         }
     });
-
-    // `axum::Server` is a re-export of `hyper::Server`
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3001));
-    tracing::debug!("listening on {}", addr);
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
 }
 
-// basic handler that responds with a static string
-async fn root() -> &'static str {
-    "Cool app, hey, World!"
+fn alpaca_client() -> Client {
+    let api_info = ApiInfo::from_env().unwrap();
+    Client::new(api_info)
+}
+
+fn error_as_json(code: StatusCode, msg: &str) -> (StatusCode, Json<serde_json::Value>) {
+    let body = json!({ "error": msg });
+    (code, Json(body))
+}
+
+// -- Handlers --
+async fn root() -> impl IntoResponse {
+    Json(json!({ "message": "Hello, World!" }))
 }
 
 async fn get_last_trade(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
-    let api_info = ApiInfo::from_env().unwrap();
-    let client = Client::new(api_info);
-
     let req = last_trade::LastTradeRequest::new(
         params
             .get("sym")
@@ -114,26 +124,20 @@ async fn get_last_trade(Query(params): Query<HashMap<String, String>>) -> impl I
             .map(|s| s.to_string()) // ug
             .collect(),
     );
-    let trade = client.issue::<last_trade::Get>(&req).await.unwrap();
+    let trade = alpaca_client().issue::<last_trade::Get>(&req).await.unwrap();
 
     (StatusCode::OK, Json(trade))
 }
 
 async fn get_quote(Path(symbol): Path<String>) -> impl IntoResponse {
-    let api_info = ApiInfo::from_env().unwrap();
-    let client = Client::new(api_info);
-
     let req = last_quote::LastQuoteReq::new(vec![symbol]);
-    let quotes = client.issue::<last_quote::Get>(&req).await.unwrap();
+    let quotes = alpaca_client().issue::<last_quote::Get>(&req).await.unwrap();
 
     (StatusCode::OK, Json(quotes))
 }
 
 async fn get_positions() -> impl IntoResponse {
-    let api_info = ApiInfo::from_env().unwrap();
-    let client = Client::new(api_info);
-
-    let positions = client.issue::<positions::Get>(&()).await.unwrap();
+    let positions = alpaca_client().issue::<positions::Get>(&()).await.unwrap();
 
     (StatusCode::OK, Json(positions))
 }
@@ -146,16 +150,6 @@ async fn get_lots() -> impl IntoResponse {
     tracing::debug!("lots: {:?}", lots.len());
 
     (StatusCode::OK, Json(lots))
-}
-
-fn alpaca_client() -> Client {
-    let api_info = ApiInfo::from_env().unwrap();
-    Client::new(api_info)
-}
-
-fn error_as_json(code: StatusCode, msg: &str) -> (StatusCode, Json<serde_json::Value>) {
-    let body = json!({ "error": msg });
-    (code, Json(body))
 }
 
 #[derive(Debug, Deserialize)]
@@ -231,10 +225,9 @@ struct OrderLiquidationInput {
 }
 
 async fn liquidate_order(Json(input): Json<OrderLiquidationInput>) -> impl IntoResponse {
-    let api_info = ApiInfo::from_env().unwrap();
-    let client = Client::new(api_info);
     let id = &input.id;
     tracing::debug!("Fetching order with id {}", id.as_hyphenated());
+    let client = alpaca_client();
 
     let get_order = client.issue::<order::Get>(&id).await;
 
