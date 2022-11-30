@@ -213,46 +213,20 @@ impl Lot {
         )?;
         Ok(lots)
     }
-}
 
-#[cfg(test)]
-fn build_lot_for_test() -> Lot {
-    Lot {
-        created_at: Some(Utc::now()),
-        sym: Some("TEST".to_string()),
-        qty: Some(Num::from(1)),
-        position_type: Some(PositionType::Long),
-        status: Some(LotStatus::Open),
-        time_in_force: Some(OrderTimeInForce::Day),
-        limit_price: Some(Num::from(1)),
-        target_price: Some(Num::from(1)),
-        stop_price: Some(Num::from(1)),
-        ..Default::default()
+    pub fn default_for_test() -> Self {
+        Self {
+            created_at: Some(Utc::now()),
+            client_id: Uuid::new_v4().to_string().into(),
+            sym: Some("TEST".into()),
+            qty: Some(Num::from(1)),
+            position_type: Some(PositionType::Long),
+            status: Some(LotStatus::Open),
+            time_in_force: Some(OrderTimeInForce::Day),
+            limit_price: Some(Num::from(1)),
+            target_price: Some(Num::from(1)),
+            stop_price: Some(Num::from(1)),
+            ..Default::default()
+        }
     }
-}
-
-#[cfg(test)]
-fn setup() {
-    let _res = std::panic::catch_unwind(|| execute!("DELETE FROM lot").unwrap());
-}
-
-// this really tests that turbosql is working, but there were ... <issues> ... with the enum.
-#[test]
-fn test_lot_can_be_saved_and_fetched() {
-    setup();
-    let lot = build_lot_for_test();
-    let rowid = lot.insert().unwrap();
-    assert!(rowid > 0);
-    let lot = Lot::get(rowid).unwrap();
-    assert_eq!(lot.sym.unwrap(), "TEST");
-    assert_eq!(lot.status.unwrap(), LotStatus::Open);
-
-    let mut lot2 = build_lot_for_test();
-    lot2.status = Some(LotStatus::Canceled);
-    let rowid = lot2.insert().unwrap();
-    assert!(rowid > 1);
-
-    let lots = select!(Vec<Lot> "WHERE status = ?", LotStatus::Open).unwrap();
-
-    assert_eq!(lots.len(), 1);
 }

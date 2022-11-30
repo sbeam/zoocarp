@@ -24,7 +24,7 @@ use num_decimal::Num;
 use dotenvy::dotenv;
 
 mod sync_lots;
-use sync_lots::startup_sync;
+use sync_lots::*;
 
 use zoocarp::*;
 
@@ -85,16 +85,24 @@ fn listen_for_trade_updates() {
         loop {
             let message = socket.read_message();
             if let Ok(msg) = message {
+                let msg_len = msg.len();
                 // Alpaca only sends binary on this channel for some reason, but playing it safe
                 let text_msg = if msg.is_binary() {
                     match msg.into_text() {
                         Ok(text) => text,
-                        Err(_) => String::from("unknown binary data"),
+                        Err(_) => {
+                            tracing::warn!(
+                                "websocket recv {} bytes of unknown binary data, skipping",
+                                msg_len
+                            );
+                            continue;
+                        }
                     }
                 } else {
                     msg.to_string()
                 };
-                tracing::info!("websocket recv: {:?}", text_msg);
+                tracing::info!("websocket recv: {}", text_msg);
+                sync_trade_update(&text_msg).unwrap();
             }
         }
     });
@@ -124,14 +132,20 @@ async fn get_last_trade(Query(params): Query<HashMap<String, String>>) -> impl I
             .map(|s| s.to_string()) // ug
             .collect(),
     );
-    let trade = alpaca_client().issue::<last_trade::Get>(&req).await.unwrap();
+    let trade = alpaca_client()
+        .issue::<last_trade::Get>(&req)
+        .await
+        .unwrap();
 
     (StatusCode::OK, Json(trade))
 }
 
 async fn get_quote(Path(symbol): Path<String>) -> impl IntoResponse {
     let req = last_quote::LastQuoteReq::new(vec![symbol]);
-    let quotes = alpaca_client().issue::<last_quote::Get>(&req).await.unwrap();
+    let quotes = alpaca_client()
+        .issue::<last_quote::Get>(&req)
+        .await
+        .unwrap();
 
     (StatusCode::OK, Json(quotes))
 }
