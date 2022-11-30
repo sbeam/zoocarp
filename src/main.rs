@@ -11,6 +11,8 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use tower_http::cors::CorsLayer;
+use tungstenite::{connect, Message};
+use url::Url;
 
 use apca::api::v2::{order, positions};
 use apca::data::v2::{last_quote, last_trade};
@@ -47,6 +49,44 @@ async fn main() {
         .route("/order/:id", delete(cancel_order))
         .route("/liquidate", patch(liquidate_order))
         .layer(CorsLayer::permissive());
+
+    let api_info = ApiInfo::from_env().unwrap();
+    tracing::debug!("{:?}", api_info);
+
+    let mut url = api_info.data_stream_base_url;
+    url.set_path("/stream");
+
+    let (mut socket, _response) = connect(url).expect("Can't connect");
+    tracing::debug!("WebSocket handshake has been successfully completed");
+
+    let auth =
+        json!({ "action": "auth", "key": api_info.key_id, "secret": api_info.secret }).to_string();
+    socket.write_message(Message::text(auth)).unwrap();
+
+    socket
+        .write_message(Message::Text(
+            r#"{ "action": "listen", "data": { "streams": ["trade_updates"] } }"#.into(),
+        ))
+        .unwrap();
+
+    // put our ears on for those sweet sweet trade updates <--- lol copilot wrote this
+    tokio::spawn(async move {
+        loop {
+            let message = socket.read_message();
+            if let Ok(msg) = message {
+                // Alpaca only sends binary on this channel for some reason, but playing it safe
+                let text_msg = if msg.is_binary() {
+                    match msg.into_text() {
+                        Ok(text) => text,
+                        Err(_) => String::from("unknown binary data"),
+                    }
+                } else {
+                    msg.to_string()
+                };
+                tracing::info!("websocket recv: {:?}", text_msg);
+            }
+        }
+    });
 
     // `axum::Server` is a re-export of `hyper::Server`
     let addr = SocketAddr::from(([127, 0, 0, 1], 3001));
