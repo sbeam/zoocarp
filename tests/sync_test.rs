@@ -1,4 +1,5 @@
 use num_decimal::Num;
+use std::fs::read_to_string;
 use turbosql::{execute, select, Turbosql};
 use zoocarp::{sync_lots::*, Lot, LotStatus, OrderTimeInForce, PositionType};
 
@@ -21,7 +22,7 @@ fn create_lot() -> Lot {
     select!(Lot "WHERE rowid = ?", rowid).unwrap()
 }
 
-// this really tests that turbosql is working, but there were ... <issues> ... with the enum.
+// this really tests that turbosql is working, but also that ToSql hack is in place to make status selectable
 #[test]
 fn test_lot_can_be_saved_and_fetched() {
     setup();
@@ -41,10 +42,18 @@ fn test_lot_can_be_saved_and_fetched() {
 }
 
 #[test]
-fn test_sync_trade_update() {
+fn test_sync_trade_update_fill() {
     setup();
-    let lot = create_lot();
-    assert!(lot.rowid > Some(0));
-    assert_eq!(lot.sym.unwrap(), "TEST");
-    assert_eq!(lot.status.unwrap(), LotStatus::Pending);
+    let mut lot = create_lot();
+    let fixture_client_id = "c4390a00-cc88-4979-840c-7feeb08278c5".to_string();
+    lot.client_id = Some(fixture_client_id.clone());
+    lot.update().unwrap();
+
+    let message = read_to_string("tests/fixtures/update_fill.json").unwrap();
+    let _res = sync_trade_update(&message).expect("sync_trade_update failed");
+
+    let lot = Lot::get_by_client_id(&fixture_client_id).unwrap();
+    assert_eq!(lot.qty, Some(Num::from(90)));
+    assert_eq!(lot.filled_avg_price, Some(Num::new(1354, 100)));
+    assert_eq!(lot.cost_basis, Some(Num::new(121860, 100)));
 }

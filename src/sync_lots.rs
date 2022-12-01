@@ -44,14 +44,14 @@ enum Event {
 // process a trade_update message
 pub fn sync_trade_update(msg: &str) -> Result<(), Box<dyn Error>> {
     let update_message: TradeUpdateMessageRoot = serde_json::from_str(msg)?;
-    if update_message.stream != "trade_update" {
+    if update_message.stream != "trade_updates" {
         return Ok(());
     }
     match update_message.data.event {
         Event::Fill | Event::PartialFill => {
             let order = update_message.data.order;
             let mut lot = Lot::get_by_client_id(&order.client_order_id)?;
-            tracing::debug!(
+            tracing::info!(
                 "sync_trade_update: order filled {:?} {:?}",
                 lot.sym,
                 order.id
