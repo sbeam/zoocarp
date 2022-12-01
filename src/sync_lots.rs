@@ -25,6 +25,8 @@ struct TradeUpdateMessageData {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 enum Event {
+    #[serde(rename = "new")]
+    New,
     #[serde(rename = "fill")]
     Fill,
     #[serde(rename = "partial_fill")]
@@ -51,8 +53,10 @@ pub fn sync_trade_update(msg: &str) -> Result<(), Box<dyn Error>> {
         Event::Fill | Event::PartialFill => {
             let order = update_message.data.order;
             let mut lot = Lot::get_by_client_id(&order.client_order_id)?;
+            lot.set_status_from(&order.status);
             tracing::info!(
-                "sync_trade_update: order filled {:?} {:?}",
+                "sync_trade_update: order status {:?}: {:?} {:?}",
+                order.status,
                 lot.sym,
                 order.id
             );

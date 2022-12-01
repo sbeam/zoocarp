@@ -38,7 +38,7 @@ async fn main() {
     startup_sync().await.unwrap();
 
     // Subscribe to trade_updates
-    listen_for_trade_updates();
+    listen_for_trade_updates().unwrap();
 
     // build our application with a route
     let app = Router::new()
@@ -61,7 +61,7 @@ async fn main() {
         .unwrap();
 }
 
-fn listen_for_trade_updates() {
+fn listen_for_trade_updates() -> Result<(), tungstenite::Error> {
     let api_info = ApiInfo::from_env().unwrap();
 
     let mut url = api_info.data_stream_base_url;
@@ -72,13 +72,11 @@ fn listen_for_trade_updates() {
 
     let auth =
         json!({ "action": "auth", "key": api_info.key_id, "secret": api_info.secret }).to_string();
-    socket.write_message(Message::text(auth)).unwrap();
+    socket.write_message(Message::text(auth))?;
 
-    socket
-        .write_message(Message::Text(
-            r#"{ "action": "listen", "data": { "streams": ["trade_updates"] } }"#.into(),
-        ))
-        .unwrap();
+    socket.write_message(Message::Text(
+        r#"{ "action": "listen", "data": { "streams": ["trade_updates"] } }"#.into(),
+    ))?;
 
     // put our ears on for those sweet sweet trade updates <--- lol copilot wrote this
     tokio::spawn(async move {
@@ -101,11 +99,32 @@ fn listen_for_trade_updates() {
                 } else {
                     msg.to_string()
                 };
+                if text_msg.is_empty() { // pings
+                    tracing::debug!("websocket: recv ping");
+                    continue;
+                }
+
                 tracing::info!("websocket recv: {}", text_msg);
-                sync_trade_update(&text_msg).unwrap();
+                let resp: Result<serde_json::Value, serde_json::Error> =
+                    serde_json::from_str(&text_msg);
+                match resp {
+                    Ok(content) => {
+                        if content["data"].get("event").is_some() {
+                            let res = sync_trade_update(&text_msg);
+                            if let Err(e) = res {
+                                tracing::error!("error syncing trade update: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("could not deserialize message: {}", e);
+                        continue;
+                    }
+                }
             }
         }
     });
+    Ok(())
 }
 
 fn alpaca_client() -> Client {

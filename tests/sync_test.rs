@@ -47,6 +47,7 @@ fn test_sync_trade_update_fill() {
     let mut lot = create_lot();
     let fixture_client_id = "c4390a00-cc88-4979-840c-7feeb08278c5".to_string();
     lot.client_id = Some(fixture_client_id.clone());
+    assert_eq!(lot.status, Some(LotStatus::Pending));
     lot.update().unwrap();
 
     let message = read_to_string("tests/fixtures/update_fill.json").unwrap();
@@ -56,4 +57,5 @@ fn test_sync_trade_update_fill() {
     assert_eq!(lot.qty, Some(Num::from(90)));
     assert_eq!(lot.filled_avg_price, Some(Num::new(1354, 100)));
     assert_eq!(lot.cost_basis, Some(Num::new(121860, 100)));
+    assert_eq!(lot.status, Some(LotStatus::Open));
 }
