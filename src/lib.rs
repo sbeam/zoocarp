@@ -178,6 +178,20 @@ impl Lot {
         Ok(self)
     }
 
+    pub fn dispose_with(
+        &mut self,
+        order: &apca::api::v2::order::Order,
+    ) -> Result<&mut Self, turbosql::Error> {
+        self.disposed_at = Some(Utc::now());
+        self.disposing_order_id = Some(order.id);
+        self.dispose_reason = Some(DisposeReason::Liquidation);
+        self.disposed_avg_price = order.average_fill_price.clone();
+        self.disposed_stop_price = order.stop_price.clone();
+        self.status = LotStatus::Disposed.into();
+        self.update()?;
+        Ok(self)
+    }
+
     pub fn set_cost_basis(&mut self, qty: &Num, fill_price: &Option<Num>) {
         self.cost_basis = if let Some(price) = fill_price {
             Some(price * qty)

@@ -99,7 +99,8 @@ fn listen_for_trade_updates() -> Result<(), tungstenite::Error> {
                 } else {
                     msg.to_string()
                 };
-                if text_msg.is_empty() { // pings
+                if text_msg.is_empty() {
+                    // pings
                     tracing::debug!("websocket: recv ping");
                     continue;
                 }
@@ -254,11 +255,21 @@ struct OrderLiquidationInput {
     stop: Option<Num>,
     #[serde(rename = "orderType")]
     type_: Option<order::Type>,
-    id: order::Id,
+    id: String,
 }
 
 async fn liquidate_order(Json(input): Json<OrderLiquidationInput>) -> impl IntoResponse {
-    let id = &input.id;
+    let client_id = &input.id;
+
+    let mut lot = Lot::get_by_client_id(&client_id).unwrap();
+    if lot.status != Some(LotStatus::Open) {
+        return error_as_json(
+            StatusCode::BAD_REQUEST,
+            "Lot is not open, cannont be liquidate",
+        );
+    }
+
+    let id = lot.open_order_id.unwrap();
     tracing::debug!("Fetching order with id {}", id.as_hyphenated());
     let client = alpaca_client();
 
@@ -291,18 +302,6 @@ async fn liquidate_order(Json(input): Json<OrderLiquidationInput>) -> impl IntoR
                 order::Amount::quantity(retrieved.filled_quantity),
             );
             tracing::debug!("req! {:?}", reqt);
-
-            let result = client.issue::<order::Post>(&reqt).await;
-            if result.is_err() {
-                tracing::debug!("bad! {:?}", result);
-                let e = result.err().unwrap();
-                let body = Json(json!({
-                    "error": e.to_string()
-                }));
-                return (StatusCode::BAD_REQUEST, body);
-            }
-            let replaced = result.unwrap();
-
             // might want to use OCO but not clear on how to work it with a bracket order
             if retrieved.legs.len() > 1 {
                 let open_legs = retrieved
@@ -317,14 +316,24 @@ async fn liquidate_order(Json(input): Json<OrderLiquidationInput>) -> impl IntoR
                 tracing::debug!("Base order already terminal");
             } else {
                 client.issue::<order::Delete>(&retrieved.id).await.unwrap();
-                tracing::debug!(
-                    "Deleted order {}, new Sell order {}",
-                    retrieved.id.as_hyphenated(),
-                    replaced.id.as_hyphenated()
-                );
+                tracing::debug!("Deleted order {}", retrieved.id.as_hyphenated());
             }
 
-            (StatusCode::OK, Json(json!(replaced)))
+            let result = client.issue::<order::Post>(&reqt).await;
+            if result.is_err() {
+                tracing::debug!("bad! {:?}", result);
+                let e = result.err().unwrap();
+                let body = Json(json!({
+                    "error": e.to_string()
+                }));
+                return (StatusCode::BAD_REQUEST, body);
+            }
+            let replaced = result.unwrap();
+            tracing::debug!("Replaced with order {}", replaced.id.as_hyphenated());
+
+            let lot = lot.dispose_with(&replaced).unwrap();
+
+            (StatusCode::OK, Json(json!(lot)))
         }
     }
 }
