@@ -79,7 +79,7 @@ pub fn sync_trade_update(msg: &str) -> Result<(), Box<dyn Error>> {
 pub async fn startup_sync() -> Result<(), Box<dyn Error>> {
     let api_info = ApiInfo::from_env().unwrap();
     let client = Client::new(api_info);
-    let open_lots = select!(
+    let mut open_lots = select!(
         Vec<Lot> "WHERE status != ? AND status != ? AND client_id IS NOT NULL",
         LotStatus::Canceled,
         LotStatus::Disposed
@@ -87,7 +87,7 @@ pub async fn startup_sync() -> Result<(), Box<dyn Error>> {
     .unwrap_or_default();
     tracing::info!("Syncing {} open lots", open_lots.len());
 
-    join_all(open_lots.iter().map(|lot| {
+    join_all(open_lots.iter_mut().map(|lot| {
         tracing::debug!("startup_sync: {:?}", lot);
 
         async {
@@ -96,36 +96,7 @@ pub async fn startup_sync() -> Result<(), Box<dyn Error>> {
                 .await;
             match alpaca_order {
                 Ok(order) => {
-                    if lot.broker_status != Some(order.status) {
-                        let mut lot = lot.clone();
-                        lot.set_status_from(&order.status);
-                        match order.status {
-                            order::Status::Filled | order::Status::PartiallyFilled => {
-                                tracing::debug!(
-                                    "startup_sync: order filled {:?} {:?}",
-                                    lot.sym,
-                                    order.id
-                                );
-                                lot.qty = Some(order.filled_quantity.clone());
-                                lot.filled_avg_price = order.average_fill_price.clone();
-                                lot.set_cost_basis(
-                                    &order.filled_quantity,
-                                    &order.average_fill_price,
-                                );
-                            }
-                            _ => {
-                                tracing::debug!(
-                                    "startup_sync: order {} status {:?}",
-                                    order.id.to_string(),
-                                    order.status
-                                );
-                            }
-                        };
-                        if lot.open_order_id.is_none() {
-                            lot.open_order_id = Some(order.id);
-                        }
-                        lot.update().expect("failed to update lot");
-                    }
+                    lot.fill_with(&order).expect("failed to fill lot with order");
                 }
                 Err(e) => {
                     tracing::error!("startup_sync: {:?}", e);

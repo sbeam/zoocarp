@@ -149,25 +149,25 @@ sql_type = 'TEXT'
 
 [[output_generated_tables_do_not_edit.lot.columns]]
 name = 'broker_status'
-rust_type = 'Option < apca :: api :: v2 :: order :: Status >'
+rust_type = 'Option < apcaOrder :: Status >'
 sql_type = 'TEXT'
 
 [[output_generated_tables_do_not_edit.lot.columns]]
 name = 'open_order_id'
-rust_type = 'Option < apca :: api :: v2 :: order :: Id >'
+rust_type = 'Option < apcaOrder :: Id >'
 sql_type = 'TEXT'
 
 [[output_generated_tables_do_not_edit.lot.columns]]
 name = 'disposing_order_id'
-rust_type = 'Option < apca :: api :: v2 :: order :: Id >'
+rust_type = 'Option < apcaOrder :: Id >'
 sql_type = 'TEXT'
 
 [[output_generated_tables_do_not_edit.lot.columns]]
 name = 'stop_order_id'
-rust_type = 'Option < apca :: api :: v2 :: order :: Id >'
+rust_type = 'Option < apcaOrder :: Id >'
 sql_type = 'TEXT'
 
 [[output_generated_tables_do_not_edit.lot.columns]]
 name = 'target_order_id'
-rust_type = 'Option < apca :: api :: v2 :: order :: Id >'
+rust_type = 'Option < apcaOrder :: Id >'
 sql_type = 'TEXT'

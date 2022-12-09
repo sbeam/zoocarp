@@ -1,10 +1,13 @@
 pub mod sync_lots;
 
+use apca::api::v2::order as apcaOrder;
 use chrono::DateTime;
 use chrono::Utc;
 use num_decimal::Num;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
+#[cfg(test)]
+use turbosql::execute;
 use turbosql::{select, ToSql, ToSqlOutput, Turbosql};
 use uuid::Uuid;
 
@@ -98,15 +101,15 @@ pub struct Lot {
     /// Reason for disposal
     pub dispose_reason: Option<DisposeReason>,
     /// The current status on the broker system, as of the last update
-    pub broker_status: Option<apca::api::v2::order::Status>,
+    pub broker_status: Option<apcaOrder::Status>,
     /// ID of the opening order in the broker system
-    pub open_order_id: Option<apca::api::v2::order::Id>,
+    pub open_order_id: Option<apcaOrder::Id>,
     /// ID of the closing order in the broker system
-    pub disposing_order_id: Option<apca::api::v2::order::Id>,
+    pub disposing_order_id: Option<apcaOrder::Id>,
     /// ID of the stop order in the broker system
-    pub stop_order_id: Option<apca::api::v2::order::Id>,
+    pub stop_order_id: Option<apcaOrder::Id>,
     /// ID of the target order in the broker system
-    pub target_order_id: Option<apca::api::v2::order::Id>,
+    pub target_order_id: Option<apcaOrder::Id>,
 }
 
 impl Lot {
@@ -145,43 +148,83 @@ impl Lot {
         Ok(lot)
     }
 
-    pub fn fill_with(
-        &mut self,
-        order: &apca::api::v2::order::Order,
-    ) -> Result<&mut Self, turbosql::Error> {
-        let qty = order.filled_quantity.clone();
+    pub fn fill_with(&mut self, order: &apcaOrder::Order) -> Result<&mut Self, turbosql::Error> {
+        if self.broker_status != Some(order.status) {
+            let qty = order.filled_quantity.clone();
 
-        self.open_order_id = Some(order.id);
-        self.limit_price = order.limit_price.clone();
-        self.filled_avg_price = order.average_fill_price.clone();
-        self.set_cost_basis(&qty, &order.average_fill_price);
+            self.set_status_from(&order.status);
+            match order.status {
+                apcaOrder::Status::Filled | apcaOrder::Status::PartiallyFilled => {
+                    tracing::debug!(
+                        "startup_sync: order fill: {:?} {:?} {:?}",
+                        order.status,
+                        self.sym,
+                        order.id
+                    );
+                    self.open_order_id = Some(order.id);
+                    self.limit_price = order.limit_price.clone();
+                    self.filled_avg_price = order.average_fill_price.clone();
+                    self.set_cost_basis(&qty, &order.average_fill_price);
+                    if self.open_order_id.is_none() {
+                        self.open_order_id = Some(order.id);
+                    }
+                }
+                // TODO: Expired, Rejected
+                _ => {
+                    tracing::debug!(
+                        "lot::fill_with: order {} status {:?}",
+                        order.id.to_string(),
+                        order.status
+                    );
+                }
+            }
 
-        if &order.legs.len() > &0 {
-            let stop_order = order
-                .legs
-                .clone()
-                .into_iter()
-                .filter(|leg| leg.type_ == apca::api::v2::order::Type::Stop)
-                .next();
-            self.stop_order_id = Some(stop_order.unwrap().id);
+            if &order.legs.len() > &0 {
+                let stop_order = order
+                    .legs
+                    .clone()
+                    .into_iter()
+                    .filter(|leg| leg.type_ == apcaOrder::Type::Stop)
+                    .next();
+                if let Some(stop_order) = stop_order {
+                    self.stop_order_id = Some(stop_order.id);
+                    match stop_order.status {
+                        apcaOrder::Status::Filled | apcaOrder::Status::PartiallyFilled => {
+                            self.disposed_at = stop_order.filled_at;
+                            self.disposed_avg_price = stop_order.average_fill_price;
+                            self.dispose_reason = Some(DisposeReason::StopOut);
+                            self.disposing_order_id = Some(stop_order.id);
+                        }
+                        _ => {}
+                    }
+                }
 
-            let target_order = order
-                .legs
-                .clone()
-                .into_iter()
-                .filter(|leg| leg.type_ == apca::api::v2::order::Type::Limit)
-                .next();
-            self.target_order_id = Some(target_order.unwrap().id);
-        };
-        self.set_status_from(&order.status);
-        self.update()?;
+                let target_order = order
+                    .legs
+                    .clone()
+                    .into_iter()
+                    .filter(|leg| leg.type_ == apcaOrder::Type::Limit)
+                    .next();
+
+                if let Some(target_order) = target_order {
+                    self.target_order_id = Some(target_order.id);
+                    match target_order.status {
+                        apcaOrder::Status::Filled | apcaOrder::Status::PartiallyFilled => {
+                            self.disposed_at = target_order.filled_at;
+                            self.disposed_avg_price = target_order.average_fill_price;
+                            self.dispose_reason = Some(DisposeReason::Profit);
+                            self.disposing_order_id = Some(target_order.id);
+                        }
+                        _ => {}
+                    }
+                }
+            };
+            self.update()?;
+        }
         Ok(self)
     }
 
-    pub fn dispose_with(
-        &mut self,
-        order: &apca::api::v2::order::Order,
-    ) -> Result<&mut Self, turbosql::Error> {
+    pub fn dispose_with(&mut self, order: &apcaOrder::Order) -> Result<&mut Self, turbosql::Error> {
         self.disposed_at = Some(Utc::now());
         self.disposing_order_id = Some(order.id);
         self.dispose_reason = Some(DisposeReason::Liquidation);
@@ -200,17 +243,16 @@ impl Lot {
         };
     }
 
-    pub fn set_status_from(&mut self, status: &apca::api::v2::order::Status) {
+    pub fn set_status_from(&mut self, status: &apcaOrder::Status) {
         self.broker_status = Some(status.clone());
         self.status = match status {
-            apca::api::v2::order::Status::New
-            | apca::api::v2::order::Status::PendingNew
-            | apca::api::v2::order::Status::Accepted => Some(LotStatus::Pending),
-            apca::api::v2::order::Status::PartiallyFilled
-            | apca::api::v2::order::Status::Filled => Some(LotStatus::Open),
-            apca::api::v2::order::Status::Canceled
-            | apca::api::v2::order::Status::Rejected
-            | apca::api::v2::order::Status::Expired => Some(LotStatus::Canceled),
+            apcaOrder::Status::New
+            | apcaOrder::Status::PendingNew
+            | apcaOrder::Status::Accepted => Some(LotStatus::Pending),
+            apcaOrder::Status::PartiallyFilled | apcaOrder::Status::Filled => Some(LotStatus::Open),
+            apcaOrder::Status::Canceled
+            | apcaOrder::Status::Rejected
+            | apcaOrder::Status::Expired => Some(LotStatus::Canceled),
             _ => Some(LotStatus::Other), // this should never happen so going to flag these for
                                          // manual followup
         }
@@ -227,4 +269,140 @@ impl Lot {
         )?;
         Ok(lots)
     }
+}
+
+#[cfg(test)]
+fn setup() {
+    let _res = std::panic::catch_unwind(|| execute!("DELETE FROM lot").unwrap());
+}
+
+#[cfg(test)]
+fn create_lot() -> Lot {
+    let rowid = Lot::create(
+        "TEST".to_string(),
+        Num::from(11),
+        PositionType::Long,
+        Some(Num::from(101)),
+        Some(Num::from(102)),
+        Some(Num::from(99)),
+        Some(OrderTimeInForce::Day),
+    );
+    select!(Lot "WHERE rowid = ?", rowid).unwrap()
+}
+
+#[cfg(test)]
+fn apca_order() -> apcaOrder::Order {
+    apcaOrder::Order {
+        id: apcaOrder::Id(Uuid::new_v4()),
+        client_order_id: "c4390a00-cc88-4979-840c-7feeb08278c5".to_string(),
+        status: apcaOrder::Status::Filled,
+        created_at: chrono::Utc::now(),
+        updated_at: Some(chrono::Utc::now()),
+        submitted_at: Some(chrono::Utc::now()),
+        filled_at: Some(chrono::Utc::now()),
+        expired_at: None,
+        canceled_at: None,
+        asset_class: apca::api::v2::asset::Class::UsEquity,
+        asset_id: apca::api::v2::asset::Id(Uuid::new_v4()),
+        symbol: "TEST".to_string(),
+        amount: apcaOrder::Amount::quantity(100),
+        filled_quantity: Num::from(100),
+        type_: apcaOrder::Type::Limit,
+        class: apcaOrder::Class::Bracket,
+        side: apcaOrder::Side::Buy,
+        time_in_force: apcaOrder::TimeInForce::UntilCanceled,
+        stop_price: Some(Num::from(0)),
+        limit_price: Some(Num::from(0)),
+        trail_price: None,
+        trail_percent: None,
+        average_fill_price: Some(Num::from(101)),
+        extended_hours: false,
+        legs: vec![],
+    }
+}
+
+#[cfg(test)]
+fn apca_bracket_order() -> apcaOrder::Order {
+    let mut order = apca_order();
+
+    let mut stop = apca_order();
+    stop.side = apcaOrder::Side::Sell;
+    stop.type_ = apcaOrder::Type::Stop;
+    stop.filled_quantity = Num::from(0);
+    stop.filled_at = None;
+    stop.stop_price = Some(Num::from(99));
+    stop.status = apcaOrder::Status::Held;
+
+    let mut limit = apca_order();
+    limit.side = apcaOrder::Side::Sell;
+    limit.type_ = apcaOrder::Type::Limit;
+    limit.filled_quantity = Num::from(0);
+    limit.filled_at = None;
+    limit.limit_price = Some(Num::from(103));
+    limit.status = apcaOrder::Status::New;
+
+    order.legs = vec![limit, stop];
+    order
+}
+
+#[test]
+fn test_fill_with() {
+
+    setup();
+
+    let order = apca_bracket_order();
+
+    let mut lot = create_lot();
+
+    lot.fill_with(&order).unwrap();
+    assert_eq!(lot.filled_avg_price, order.average_fill_price);
+    assert_eq!(lot.open_order_id.unwrap(), order.id);
+    assert_eq!(lot.limit_price, order.limit_price);
+    assert_eq!(lot.cost_basis.unwrap(), Num::from(10100));
+    assert_eq!(lot.target_order_id.unwrap(), order.legs[0].id);
+    assert_eq!(lot.stop_order_id.unwrap(), order.legs[1].id);
+}
+
+#[test]
+fn test_fill_with_when_bracket_order_stopped_out() {
+    let stopped_out_at = chrono::Utc::now();
+
+    let mut order = apca_bracket_order();
+    order.legs[0].status = apcaOrder::Status::Replaced;
+    order.legs[1].status = apcaOrder::Status::Filled;
+    order.legs[1].filled_quantity = Num::from(100);
+    order.legs[1].filled_at = Some(stopped_out_at);
+
+    let mut lot = create_lot();
+
+    lot.fill_with(&order).unwrap();
+    let stop_leg = &order.legs[1];
+    assert_eq!(lot.filled_avg_price, order.average_fill_price);
+    assert_eq!(lot.stop_order_id.unwrap(), stop_leg.id);
+    assert_eq!(lot.disposed_at.unwrap(), stopped_out_at);
+    assert_eq!(lot.disposed_avg_price.as_ref(), stop_leg.average_fill_price.as_ref());
+    assert_eq!(lot.dispose_reason, Some(DisposeReason::StopOut));
+    assert_eq!(lot.disposing_order_id, Some(stop_leg.id));
+}
+
+#[test]
+fn test_fill_with_when_bracket_order_target_hit() {
+    let closed_at = chrono::Utc::now();
+
+    let mut order = apca_bracket_order();
+    order.legs[1].status = apcaOrder::Status::Replaced;
+    order.legs[0].status = apcaOrder::Status::Filled;
+    order.legs[0].filled_quantity = Num::from(100);
+    order.legs[0].filled_at = Some(closed_at);
+
+    let mut lot = create_lot();
+
+    lot.fill_with(&order).unwrap();
+    let target_leg = &order.legs[0];
+    assert_eq!(lot.filled_avg_price, order.average_fill_price);
+    assert_eq!(lot.target_order_id.unwrap(), target_leg.id);
+    assert_eq!(lot.disposed_at.unwrap(), closed_at);
+    assert_eq!(lot.disposed_avg_price.as_ref(), target_leg.average_fill_price.as_ref());
+    assert_eq!(lot.dispose_reason, Some(DisposeReason::Profit));
+    assert_eq!(lot.disposing_order_id, Some(target_leg.id));
 }
