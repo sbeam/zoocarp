@@ -146,84 +146,106 @@ impl Lot {
         Ok(lot)
     }
 
-    pub fn detect_disposal<F>(&mut self, order: &apcaOrder::Order, order_type: apcaOrder::Type, reason: DisposeReason, field_fill: F)
-        -> Result<(), Box<dyn Error>> where
-        F: FnOnce(&mut Lot, apcaOrder::Order)
-        {
-            let disposing_order = order
-                .legs
-                .clone()
-                .into_iter()
-                .filter(|leg| leg.type_ == order_type)
-                .next();
+    pub fn detect_disposal<F>(
+        &mut self,
+        order: &apcaOrder::Order,
+        order_type: apcaOrder::Type,
+        reason: DisposeReason,
+        field_fill: F,
+    ) -> Result<(), Box<dyn Error>>
+    where
+        F: FnOnce(&mut Lot, apcaOrder::Order),
+    {
+        let disposing_order = order
+            .legs
+            .clone()
+            .into_iter()
+            .filter(|leg| leg.type_ == order_type)
+            .next();
 
-            if let Some(disposing_order) = disposing_order {
-                match disposing_order.status {
-                    apcaOrder::Status::Filled | apcaOrder::Status::PartiallyFilled => {
-                        self.status = Some(LotStatus::Disposed);
-                        self.disposed_at = disposing_order.filled_at;
-                        self.disposed_fill_price = disposing_order.average_fill_price.clone();
-                        self.dispose_reason = Some(reason);
-                        self.disposing_order_id = Some(disposing_order.id);
-                    }
-                    _ => {}
+        if let Some(disposing_order) = disposing_order {
+            match disposing_order.status {
+                apcaOrder::Status::Filled | apcaOrder::Status::PartiallyFilled => {
+                    tracing::debug!(
+                        "detect_disposal: {:?} lot {:?} order {:?}",
+                        reason,
+                        self.client_id,
+                        disposing_order.id
+                    );
+                    self.status = Some(LotStatus::Disposed);
+                    self.disposed_at = disposing_order.filled_at;
+                    self.disposed_fill_price = disposing_order.average_fill_price.clone();
+                    self.dispose_reason = Some(reason);
+                    self.disposing_order_id = Some(disposing_order.id);
                 }
-                field_fill(self, disposing_order);
+                _ => {}
             }
+            field_fill(self, disposing_order);
+        }
         Ok(())
     }
 
     pub fn fill_with(&mut self, order: &apcaOrder::Order) -> Result<&mut Self, turbosql::Error> {
-        if self.broker_status != Some(order.status) {
-            let qty = order.filled_quantity.clone();
+        let qty = order.filled_quantity.clone();
 
-            self.set_status_from(&order.status);
-            match order.status {
-                apcaOrder::Status::Filled | apcaOrder::Status::PartiallyFilled => {
-                    tracing::debug!(
-                        "startup_sync: order fill: {:?} {:?} {:?}",
-                        order.status,
-                        self.sym,
-                        order.id
-                    );
+        self.set_status_from(&order.status);
+        match order.status {
+            apcaOrder::Status::Filled | apcaOrder::Status::PartiallyFilled => {
+                tracing::debug!(
+                    "fill_with: {:?} {:?} {:?}",
+                    order.status,
+                    self.sym,
+                    order.id
+                );
+                self.open_order_id = Some(order.id);
+                self.limit_price = order.limit_price.clone();
+                self.filled_avg_price = order.average_fill_price.clone();
+                self.set_cost_basis(&qty, &order.average_fill_price);
+                if self.open_order_id.is_none() {
                     self.open_order_id = Some(order.id);
-                    self.limit_price = order.limit_price.clone();
-                    self.filled_avg_price = order.average_fill_price.clone();
-                    self.set_cost_basis(&qty, &order.average_fill_price);
-                    if self.open_order_id.is_none() {
-                        self.open_order_id = Some(order.id);
-                    }
-                }
-                // TODO: Expired, Rejected
-                _ => {
-                    tracing::debug!(
-                        "lot::fill_with: order {} status {:?}",
-                        order.id.to_string(),
-                        order.status
-                    );
                 }
             }
-
-
-            // a bracket order has a stop leg and a limit leg. The original order is already
-            // filled, so need to check each to see if either target was hit or stop was hit.
-            if &order.legs.len() > &0 {
-                self.detect_disposal(order, apcaOrder::Type::Stop, DisposeReason::StopOut, &mut |lot: &mut Lot, order: apcaOrder::Order| {
-                    lot.stop_order_id = Some(order.id);
-                    tracing::debug!("stop order linked: lot@{:?} order@{:?}", lot.client_id, order.id);
-                }).unwrap();
-
-                self.detect_disposal(order, apcaOrder::Type::Limit, DisposeReason::Profit, &mut |lot: &mut Lot, order: apcaOrder::Order| {
-                    lot.target_order_id = Some(order.id);
-                    tracing::debug!("target order linked: lot@{:?} order@{:?}", lot.client_id, order.id);
-                }).unwrap();
-            };
-            self.update()?;
+            // TODO: Expired, Rejected
+            _ => {
+                tracing::debug!(
+                    "lot::fill_with: order {} status {:?}",
+                    order.id.to_string(),
+                    order.status
+                );
+            }
         }
+
+        // a bracket order has a stop leg and a limit leg. The original order is already
+        // filled, so need to check each to see if either target was hit or stop was hit.
+        if &order.legs.len() > &0 {
+            self.detect_disposal(
+                order,
+                apcaOrder::Type::Stop,
+                DisposeReason::StopOut,
+                &mut |lot: &mut Lot, order: apcaOrder::Order| {
+                    lot.stop_order_id = Some(order.id);
+                },
+            )
+            .unwrap();
+
+            self.detect_disposal(
+                order,
+                apcaOrder::Type::Limit,
+                DisposeReason::Profit,
+                &mut |lot: &mut Lot, order: apcaOrder::Order| {
+                    lot.target_order_id = Some(order.id);
+                },
+            )
+            .unwrap();
+        };
+        self.update()?;
         Ok(self)
     }
 
-    pub fn liquidate_with(&mut self, order: &apcaOrder::Order) -> Result<&mut Self, turbosql::Error> {
+    pub fn liquidate_with(
+        &mut self,
+        order: &apcaOrder::Order,
+    ) -> Result<&mut Self, turbosql::Error> {
         self.disposed_at = Some(Utc::now());
         self.disposing_order_id = Some(order.id);
         self.dispose_reason = Some(DisposeReason::Liquidation);
@@ -345,7 +367,6 @@ fn apca_bracket_order() -> apcaOrder::Order {
 
 #[test]
 fn test_fill_with() {
-
     setup();
 
     let order = apca_bracket_order();
@@ -378,7 +399,10 @@ fn test_fill_with_when_bracket_order_stopped_out() {
     assert_eq!(lot.filled_avg_price, order.average_fill_price);
     assert_eq!(lot.stop_order_id.unwrap(), stop_leg.id);
     assert_eq!(lot.disposed_at.unwrap(), stopped_out_at);
-    assert_eq!(lot.disposed_fill_price.as_ref(), stop_leg.average_fill_price.as_ref());
+    assert_eq!(
+        lot.disposed_fill_price.as_ref(),
+        stop_leg.average_fill_price.as_ref()
+    );
     assert_eq!(lot.dispose_reason, Some(DisposeReason::StopOut));
     assert_eq!(lot.disposing_order_id, Some(stop_leg.id));
 }
@@ -400,7 +424,10 @@ fn test_fill_with_when_bracket_order_target_hit() {
     assert_eq!(lot.filled_avg_price, order.average_fill_price);
     assert_eq!(lot.target_order_id.unwrap(), target_leg.id);
     assert_eq!(lot.disposed_at.unwrap(), closed_at);
-    assert_eq!(lot.disposed_fill_price.as_ref(), target_leg.average_fill_price.as_ref());
+    assert_eq!(
+        lot.disposed_fill_price.as_ref(),
+        target_leg.average_fill_price.as_ref()
+    );
     assert_eq!(lot.dispose_reason, Some(DisposeReason::Profit));
     assert_eq!(lot.disposing_order_id, Some(target_leg.id));
 }
