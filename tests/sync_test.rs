@@ -96,6 +96,7 @@ fn apca_order() -> Order {
 #[cfg(test)]
 fn apca_bracket_order() -> Order {
     let mut order = apca_order();
+
     let mut stop = apca_order();
     stop.side = apca::api::v2::order::Side::Sell;
     stop.type_ = apca::api::v2::order::Type::Stop;
@@ -114,15 +115,4 @@ fn apca_bracket_order() -> Order {
 
     order.legs = vec![limit, stop];
     order
-}
-
-#[test]
-fn test_startup_sync_bracket_stopped_out() {
-    setup();
-
-    let order = apca_bracket_order();
-
-    let mut lot = create_lot();
-    let fixture_client_id = "c4390a00-cc88-4979-840c-7feeb08278c5".to_string();
-    lot.client_id = Some(fixture_client_id.clone());
 }

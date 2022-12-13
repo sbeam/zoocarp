@@ -331,7 +331,7 @@ async fn liquidate_order(Json(input): Json<OrderLiquidationInput>) -> impl IntoR
             let replaced = result.unwrap();
             tracing::debug!("Replaced with order {}", replaced.id.as_hyphenated());
 
-            let lot = lot.dispose_with(&replaced).unwrap();
+            let lot = lot.liquidate_with(&replaced).unwrap();
 
             (StatusCode::OK, Json(json!(lot)))
         }
