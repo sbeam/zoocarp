@@ -189,6 +189,9 @@ impl Lot {
         let qty = order.filled_quantity.clone();
 
         self.set_status_from(&order.status);
+        self.open_order_id = Some(order.id);
+        self.limit_price = order.limit_price.clone();
+
         match order.status {
             apcaOrder::Status::Filled | apcaOrder::Status::PartiallyFilled => {
                 tracing::debug!(
@@ -197,13 +200,8 @@ impl Lot {
                     self.sym,
                     order.id
                 );
-                self.open_order_id = Some(order.id);
-                self.limit_price = order.limit_price.clone();
                 self.filled_avg_price = order.average_fill_price.clone();
                 self.set_cost_basis(&qty, &order.average_fill_price);
-                if self.open_order_id.is_none() {
-                    self.open_order_id = Some(order.id);
-                }
             }
             // TODO: Expired, Rejected
             _ => {
