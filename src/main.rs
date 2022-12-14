@@ -6,12 +6,13 @@ use axum::{
     Json, Router,
 };
 use futures::future;
+use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::json;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use tower_http::cors::CorsLayer;
-use tungstenite::{connect, Message};
 
 use apca::api::v2::{order, positions};
 use apca::data::v2::{last_quote, last_trade};
@@ -38,7 +39,7 @@ async fn main() {
     startup_sync().await.unwrap();
 
     // Subscribe to trade_updates
-    listen_for_trade_updates().unwrap();
+    listen_for_trade_updates().await.unwrap();
 
     // build our application with a route
     let app = Router::new()
@@ -61,70 +62,71 @@ async fn main() {
         .unwrap();
 }
 
-fn listen_for_trade_updates() -> Result<(), tungstenite::Error> {
+async fn listen_for_trade_updates() -> Result<(), tungstenite::Error> {
     let api_info = ApiInfo::from_env().unwrap();
 
     let mut url = api_info.data_stream_base_url;
     url.set_path("/stream");
 
-    let (mut socket, _response) = connect(url).expect("Can't connect");
+    let (socket, _response) = connect_async(url).await.expect("Can't connect");
     tracing::debug!("WebSocket handshake has been successfully completed");
+
+    let (mut writer, reader) = socket.split();
 
     let auth =
         json!({ "action": "auth", "key": api_info.key_id, "secret": api_info.secret }).to_string();
-    socket.write_message(Message::text(auth))?;
+    writer.send(Message::text(auth)).await?;
 
-    socket.write_message(Message::Text(
+    writer.send(Message::Text(
         r#"{ "action": "listen", "data": { "streams": ["trade_updates"] } }"#.into(),
-    ))?;
+    )).await?;
 
     // put our ears on for those sweet sweet trade updates <--- lol copilot wrote this
     tokio::spawn(async move {
-        loop {
-            let message = socket.read_message();
-            if let Ok(msg) = message {
-                let msg_len = msg.len();
-                // Alpaca only sends binary on this channel for some reason, but playing it safe
-                let text_msg = if msg.is_binary() {
-                    match msg.into_text() {
-                        Ok(text) => text,
-                        Err(_) => {
-                            tracing::warn!(
-                                "websocket recv {} bytes of unknown binary data, skipping",
-                                msg_len
-                            );
-                            continue;
-                        }
+        reader
+            .for_each(|message| async {
+                if let Ok(msg) = message {
+                    let msg_len = msg.len();
+                    if msg.is_ping() {
+                        tracing::debug!("websocket recv: ping");
                     }
-                } else {
-                    msg.to_string()
-                };
-                if text_msg.is_empty() {
-                    // pings
-                    tracing::debug!("websocket: recv ping");
-                    continue;
-                }
-
-                tracing::info!("websocket recv: {}", text_msg);
-                let resp: Result<serde_json::Value, serde_json::Error> =
-                    serde_json::from_str(&text_msg);
-                match resp {
-                    Ok(content) => {
-                        if content["data"].get("event").is_some() {
-                            let res = sync_trade_update(&text_msg);
-                            if let Err(e) = res {
-                                tracing::error!("error syncing trade update: {}", e);
+                    else {
+                        // Alpaca only sends binary on this channel for some reason, but playing it safe
+                        let text_msg = if msg.is_binary() {
+                            match msg.into_text() {
+                                Ok(text) => text,
+                                Err(e) => {
+                                    tracing::warn!("websocket recv {} unknown bytes, skipping: {:?}", msg_len, e);
+                                    "".to_string()
+                                }
+                            }
+                        } else {
+                            msg.to_string()
+                        };
+                        if !text_msg.is_empty() {
+                            tracing::info!("websocket recv: {}", text_msg);
+                            let resp: Result<serde_json::Value, serde_json::Error> =
+                                serde_json::from_str(&text_msg);
+                            match resp {
+                                Ok(content) => {
+                                    if content["data"].get("event").is_some() {
+                                        let res = sync_trade_update(&text_msg);
+                                        if let Err(e) = res {
+                                            tracing::error!("error syncing trade update: {}", e);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!("could not deserialize message: {}", e);
+                                }
                             }
                         }
                     }
-                    Err(e) => {
-                        tracing::warn!("could not deserialize message: {}", e);
-                        continue;
-                    }
                 }
-            }
-        }
+            })
+            .await;
     });
+
     Ok(())
 }
 
