@@ -176,11 +176,12 @@ async fn get_positions() -> impl IntoResponse {
     (StatusCode::OK, Json(positions))
 }
 
-async fn get_lots() -> impl IntoResponse {
+async fn get_lots(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
     let page = 0; // TODO: pagination
     let limit = 50;
+    let show_canceled = params.contains_key("show_canceled");
     // TODO - filter by status (open, closed, all)
-    let lots = Lot::get_lots(page, limit).unwrap();
+    let lots = Lot::get_lots(page, limit, show_canceled).unwrap();
     tracing::debug!("lots: {:?}", lots.len());
 
     (StatusCode::OK, Json(lots))

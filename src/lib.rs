@@ -278,15 +278,24 @@ impl Lot {
         }
     }
 
-    pub fn get_lots(page: i64, limit: i64) -> Result<Vec<Lot>, Box<dyn Error>> {
-        let lots = select!(
-            Vec<Lot>
-            "WHERE status = ? OR status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            LotStatus::Open,
-            LotStatus::Pending,
-            limit,
-            page * limit
-        )?;
+    pub fn get_lots(
+        page: i64,
+        limit: i64,
+        show_canceled: bool,
+    ) -> Result<Vec<Lot>, Box<dyn Error>> {
+        let lots = if show_canceled {
+            select!(Vec<Lot> "ORDER BY rowid DESC LIMIT ? OFFSET ?", limit, page * limit)?
+        } else {
+            select!(
+                Vec<Lot>
+                "WHERE status = ? OR status = ? OR status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                LotStatus::Open,
+                LotStatus::Pending,
+                LotStatus::Disposed,
+                limit,
+                page * limit
+            )?
+        };
         Ok(lots)
     }
 }
