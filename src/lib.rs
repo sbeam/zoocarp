@@ -71,7 +71,7 @@ pub struct Lot {
     /// Our local ID for the lot.
     pub client_id: Option<String>,
     /// Time original order was submitted.
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<DateTime<Utc>>, // TODO: need to track filled_at too
     /// Symbol of the position
     pub sym: Option<String>,
     /// Number of shares or contracts or coins

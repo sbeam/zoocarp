@@ -69,7 +69,7 @@ async fn listen_for_trade_updates() -> Result<(), tungstenite::Error> {
     url.set_path("/stream");
 
     let (socket, _response) = connect_async(url).await.expect("Can't connect");
-    tracing::debug!("WebSocket handshake has been successfully completed");
+    tracing::info!("WebSocket handshake has been successfully completed");
 
     let (mut writer, reader) = socket.split();
 
@@ -77,9 +77,11 @@ async fn listen_for_trade_updates() -> Result<(), tungstenite::Error> {
         json!({ "action": "auth", "key": api_info.key_id, "secret": api_info.secret }).to_string();
     writer.send(Message::text(auth)).await?;
 
-    writer.send(Message::Text(
-        r#"{ "action": "listen", "data": { "streams": ["trade_updates"] } }"#.into(),
-    )).await?;
+    writer
+        .send(Message::Text(
+            r#"{ "action": "listen", "data": { "streams": ["trade_updates"] } }"#.into(),
+        ))
+        .await?;
 
     // put our ears on for those sweet sweet trade updates <--- lol copilot wrote this
     tokio::spawn(async move {
@@ -88,15 +90,18 @@ async fn listen_for_trade_updates() -> Result<(), tungstenite::Error> {
                 if let Ok(msg) = message {
                     let msg_len = msg.len();
                     if msg.is_ping() {
-                        tracing::debug!("websocket recv: ping");
-                    }
-                    else {
+                        tracing::info!("websocket recv: ping");
+                    } else {
                         // Alpaca only sends binary on this channel for some reason, but playing it safe
                         let text_msg = if msg.is_binary() {
                             match msg.into_text() {
                                 Ok(text) => text,
                                 Err(e) => {
-                                    tracing::warn!("websocket recv {} unknown bytes, skipping: {:?}", msg_len, e);
+                                    tracing::warn!(
+                                        "websocket recv {} unknown bytes, skipping: {:?}",
+                                        msg_len,
+                                        e
+                                    );
                                     "".to_string()
                                 }
                             }
@@ -184,7 +189,6 @@ async fn get_lots(Query(params): Query<HashMap<String, String>>) -> impl IntoRes
     let show_canceled = params.contains_key("show_canceled");
     // TODO - filter by status (open, closed, all)
     let lots = Lot::get_lots(page, limit, show_canceled).unwrap();
-    tracing::debug!("lots: {:?}", lots.len());
 
     (StatusCode::OK, Json(lots))
 }
@@ -197,6 +201,7 @@ struct OrderPlacementInput {
     stop: Option<Num>,
     target: Option<Num>,
     time_in_force: Option<zoocarp::OrderTimeInForce>,
+    market: Option<bool>,
 }
 
 async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoResponse {
@@ -209,16 +214,20 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
         input.stop.clone(),
         input.time_in_force,
     );
-
     let mut lot = Lot::get(lot_id).unwrap();
 
-    // TODO bracket vs market order vs limit
+    let market = input.market.unwrap_or(false);
+
     let request = order::OrderReqInit {
         client_order_id: lot.client_id.clone(),
         class: order::Class::Bracket,
-        type_: order::Type::Limit,
-        limit_price: input.limit,
-        // extended_hours: true, // TODO make it an input
+        type_: if market {
+            order::Type::Market
+        } else {
+            order::Type::Limit
+        },
+        limit_price: if market { None } else { input.limit },
+        // extended_hours: true, // TODO make it an input, but cannot use market
         stop_loss: Some(order::StopLoss::Stop(input.stop.unwrap_or_default())),
         take_profit: Some(order::TakeProfit::Limit(input.target.unwrap_or_default())),
         time_in_force: match input.time_in_force {
@@ -235,6 +244,7 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
 
     let response = alpaca_client().issue::<order::Post>(&request).await;
     if response.is_err() {
+        tracing::error!("error placing order: {:?}", response.as_ref());
         return error_as_json(
             StatusCode::BAD_REQUEST,
             &response.err().unwrap().to_string(),
