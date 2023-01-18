@@ -140,9 +140,24 @@ fn alpaca_client() -> Client {
     Client::new(api_info)
 }
 
-fn error_as_json(code: StatusCode, msg: &str) -> (StatusCode, Json<serde_json::Value>) {
+fn json_error(code: StatusCode, msg: &str) -> (StatusCode, Json<serde_json::Value>) {
     let body = json!({ "error": msg });
     (code, Json(body))
+}
+
+// extract helpful API error responses from the apca RequestError
+fn api_post_error(
+    e: apca::RequestError<order::PostError>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match e {
+        apca::RequestError::Endpoint(order::PostError::InvalidInput(api_error)) => {
+            json_error(StatusCode::BAD_REQUEST, &api_error.unwrap().message)
+        }
+        apca::RequestError::Endpoint(order::PostError::NotPermitted(api_error)) => {
+            json_error(StatusCode::BAD_REQUEST, &api_error.unwrap().message)
+        }
+        _ => json_error(StatusCode::BAD_REQUEST, &e.to_string()),
+    }
 }
 
 // -- Handlers --
@@ -196,19 +211,24 @@ async fn get_lots(Query(params): Query<HashMap<String, String>>) -> impl IntoRes
 #[derive(Debug, Deserialize)]
 struct OrderPlacementInput {
     sym: String,
-    qty: u32,
+    qty: i32,
     limit: Option<Num>,
     stop: Option<Num>,
     target: Option<Num>,
     time_in_force: Option<zoocarp::OrderTimeInForce>,
     market: Option<bool>,
+    side: Option<zoocarp::PositionType>,
 }
 
 async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoResponse {
+    let side = input.side.unwrap_or(zoocarp::PositionType::Long);
+
+    let qty = input.qty;
+
     let lot_id = Lot::create(
         input.sym.clone(),
-        Num::from(input.qty),
-        zoocarp::PositionType::Long,
+        Num::from(qty),
+        side,
         input.limit.clone(),
         input.target.clone(),
         input.stop.clone(),
@@ -227,7 +247,7 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
             order::Type::Limit
         },
         limit_price: if market { None } else { input.limit },
-        // extended_hours: true, // TODO make it an input, but cannot use market
+        // extended_hours: true, // TODO make it an input, but cannot use market, or bracket orders per docs
         stop_loss: Some(order::StopLoss::Stop(input.stop.unwrap_or_default())),
         take_profit: Some(order::TakeProfit::Limit(input.target.unwrap_or_default())),
         time_in_force: match input.time_in_force {
@@ -238,28 +258,31 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
     }
     .init(
         input.sym,
-        order::Side::Buy,
-        order::Amount::quantity(input.qty),
+        if side == zoocarp::PositionType::Long {
+            order::Side::Buy
+        } else {
+            order::Side::Sell
+        },
+        order::Amount::quantity(qty),
     );
 
-    let response = alpaca_client().issue::<order::Post>(&request).await;
-    if response.is_err() {
-        tracing::error!("error placing order: {:?}", response.as_ref());
-        return error_as_json(
-            StatusCode::BAD_REQUEST,
-            &response.err().unwrap().to_string(),
-        );
+    match alpaca_client().issue::<order::Post>(&request).await {
+        Ok(order) => {
+            tracing::debug!("Created order {}", order.id.as_hyphenated());
+
+            lot.fill_with(&order).unwrap();
+            tracing::debug!(
+                ">>> Lot and order sync! {:?} {:?}",
+                order.id.as_hyphenated().to_string(),
+                lot.rowid
+            );
+            (StatusCode::OK, Json(json!(lot)))
+        }
+        Err(e) => {
+            tracing::error!("error placing order: {:?}", e);
+            api_post_error(e)
+        }
     }
-    let order = response.unwrap();
-    tracing::debug!("Created order {}", order.id.as_hyphenated());
-
-    lot.fill_with(&order).unwrap();
-    tracing::debug!(
-        ">>> Lot and order sync! {:?} {:?}",
-        order.id.as_hyphenated().to_string(),
-        lot.rowid
-    );
-    (StatusCode::OK, Json(json!(lot)))
 }
 
 #[derive(Debug, Deserialize)]
@@ -276,7 +299,7 @@ async fn liquidate_order(Json(input): Json<OrderLiquidationInput>) -> impl IntoR
 
     let mut lot = Lot::get_by_client_id(&client_id).unwrap();
     if lot.status != Some(LotStatus::Open) {
-        return error_as_json(
+        return json_error(
             StatusCode::BAD_REQUEST,
             "Lot is not open, cannont be liquidate",
         );
@@ -354,14 +377,14 @@ async fn liquidate_order(Json(input): Json<OrderLiquidationInput>) -> impl IntoR
 async fn cancel_order(Path(client_id): Path<String>) -> impl IntoResponse {
     let lot = Lot::get_by_client_id(&client_id).unwrap();
     if lot.status != Some(LotStatus::Pending) || lot.open_order_id.is_none() {
-        return error_as_json(StatusCode::BAD_REQUEST, "Lot cannot be cancelled");
+        return json_error(StatusCode::BAD_REQUEST, "Lot cannot be cancelled");
     }
 
     let response = alpaca_client()
         .issue::<order::Delete>(&lot.open_order_id.unwrap())
         .await;
     match response {
-        Err(e) => error_as_json(StatusCode::BAD_REQUEST, &e.to_string()),
+        Err(e) => json_error(StatusCode::BAD_REQUEST, &e.to_string()),
         Ok(_) => {
             // lot.cancel().unwrap();
             (StatusCode::OK, Json(json!(lot)))

@@ -1,7 +1,7 @@
 # F/E
 
 [ ] 2 fields for Alpaca API keys
-[ ] List open and closed positions
+[x] List open and closed positions
    - symbol
    - qty
    - date open
@@ -22,12 +22,19 @@ If closed
    - % g/li
    - slip %
 
-[x] top row blank fields for sym, qty, limit, stop, target
+[x] new order fields for sym, qty, limit, stop, target
 [ ] exec button if pending
 [x] liquidate if open
 [ ] edit stop/target if open
 [ ] page results
 [ ] filter by date, symbol, etc
+[ ] performance and bracket charts
+[ ] news
+[ ] last n trades (stream)
+[ ] history
+[ ] manual order entry
+[ ] alerts/notifications
+[ ] bucket portfolios (by broker, IRA vs play, etc)
 
 # B/E
 
@@ -42,6 +49,11 @@ If closed
 
 [x] Bracket order impl https://alpaca.markets/docs/trading/orders/#bracket-orders
 [x] Extend apca to get latest trade (not quote) https://alpaca.markets/docs/api-references/market-data-api/stock-pricing-data/historical/#latest-trade
+
+## TODO
+[ ] Shorting - does not work with bracket orders, getting `{ code: 42210000, message: "bracket orders must be entry orders" }` when trying to sell unheld stock
+[ ] clean up 404ing orders on startup_sync
+[ ] splits!
 
 Place order wf:
  1. submit values
