@@ -96,9 +96,20 @@ pub async fn startup_sync() -> Result<(), Box<dyn Error>> {
                 .await;
             match alpaca_order {
                 Ok(order) => {
-                    lot.fill_with(&order).expect("failed to fill lot with order");
+                    lot.fill_with(&order)
+                        .expect("failed to fill lot with order");
                 }
                 Err(e) => {
+                    // : startup_sync: Endpoint(NotFound(Ok(ApiError { code: 40410000, message: "order not found for e131881b-d6b0-4378-a5d5-cd419c4d3d34" })))
+                    match e.source() {
+                        Some(source) => {
+                            if source.to_string().contains("order not found") {
+                                lot.status = Some(LotStatus::Canceled);
+                                lot.update().expect("failed to update lot");
+                            }
+                        }
+                        None => {}
+                    }
                     tracing::error!("startup_sync: {:?}", e);
                 }
             }
