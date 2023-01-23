@@ -83,53 +83,58 @@ async fn listen_for_trade_updates() -> Result<(), tungstenite::Error> {
         ))
         .await?;
 
-    // put our ears on for those sweet sweet trade updates <--- lol copilot wrote this
-    tokio::spawn(async move {
-        reader
-            .for_each(|message| async {
-                if let Ok(msg) = message {
-                    let msg_len = msg.len();
-                    if msg.is_ping() {
-                        tracing::info!("websocket recv: ping");
-                    } else {
-                        // Alpaca only sends binary on this channel for some reason, but playing it safe
-                        let text_msg = if msg.is_binary() {
-                            match msg.into_text() {
-                                Ok(text) => text,
-                                Err(e) => {
-                                    tracing::warn!(
-                                        "websocket recv {} unknown bytes, skipping: {:?}",
-                                        msg_len,
-                                        e
-                                    );
-                                    "".to_string()
-                                }
-                            }
-                        } else {
-                            msg.to_string()
-                        };
-                        if !text_msg.is_empty() {
-                            tracing::info!("websocket recv: {}", text_msg);
-                            let resp: Result<serde_json::Value, serde_json::Error> =
-                                serde_json::from_str(&text_msg);
-                            match resp {
-                                Ok(content) => {
-                                    if content["data"].get("event").is_some() {
-                                        let res = sync_trade_update(&text_msg);
-                                        if let Err(e) = res {
-                                            tracing::error!("error syncing trade update: {}", e);
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::warn!("could not deserialize message: {}", e);
-                                }
-                            }
+    let _handle = tokio::spawn(async move {
+        let process_json_message = |text_msg: &str| {
+            tracing::info!("websocket recv: {}", text_msg);
+            let resp: Result<serde_json::Value, serde_json::Error> =
+                serde_json::from_str(&text_msg);
+            match resp {
+                Ok(content) => {
+                    if content["data"].get("event").is_some() {
+                        let res = sync_trade_update(&text_msg);
+                        if let Err(e) = res {
+                            tracing::error!("error syncing trade update: {}", e);
                         }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("could not deserialize message: {}", e);
+                }
+            }
+        };
+
+        reader
+            .for_each(|message| async move {
+                match message {
+                    Ok(Message::Ping(_msg)) => {
+                        tracing::info!("websocket recv: ping");
+                    }
+                    Ok(Message::Pong(_msg)) => {
+                        tracing::info!("websocket recv: PONG");
+                    }
+                    Ok(Message::Text(msg)) => {
+                        let text_msg = msg.to_string();
+                        process_json_message(&text_msg);
+                    }
+                    Ok(Message::Binary(msg)) => {
+                        tracing::info!("websocket recv: binary");
+                        let text = String::from_utf8_lossy(&msg);
+                        process_json_message(&text);
+                    }
+                    Ok(Message::Close(_msg)) => {
+                        tracing::warn!("websocket recv: CLOSE!!!!");
+                    }
+                    Err(e) => {
+                        tracing::error!("websocket error: {:?}", e);
+                    }
+                    _ => {
+                        tracing::info!("websocket recv: unknown {:?}", message);
                     }
                 }
             })
             .await;
+
+        tracing::info!("websocket: stream ended");
     });
 
     Ok(())
@@ -272,7 +277,7 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
 
             lot.fill_with(&order).unwrap();
             tracing::debug!(
-                ">>> Lot and order sync! {:?} {:?}",
+                ">>> New order: {:?} => {:?}",
                 order.id.as_hyphenated().to_string(),
                 lot.rowid
             );
