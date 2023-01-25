@@ -55,6 +55,7 @@ async fn main() {
         .route("/order/:id", delete(cancel_order))
         .route("/liquidate", patch(liquidate_order))
         .route("/bucket", post(create_bucket))
+        .route("/bucket/:name", patch(update_bucket))
         .layer(CorsLayer::permissive());
 
     // `axum::Server` is a re-export of `hyper::Server`
@@ -412,5 +413,16 @@ async fn create_bucket(Json(input): Json<BucketInput>) -> impl IntoResponse {
     match bucket {
         Ok(b) => (StatusCode::OK, Json(json!(b))),
         Err(e) => json_error(StatusCode::BAD_REQUEST, &e.to_string()),
+    }
+}
+
+async fn update_bucket(
+    Path(old_bucket_name): Path<String>,
+    Json(input): Json<BucketInput>,
+) -> impl IntoResponse {
+    let bucket = Bucket::update_name(&old_bucket_name, &input.name);
+    match bucket {
+        Ok(b) => (StatusCode::OK, Json(json!(b))),
+        Err(e) => json_error(StatusCode::NOT_FOUND, &e.to_string()),
     }
 }
