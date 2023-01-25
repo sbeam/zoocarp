@@ -54,6 +54,7 @@ async fn main() {
         .route("/order", post(place_order))
         .route("/order/:id", delete(cancel_order))
         .route("/liquidate", patch(liquidate_order))
+        .route("/buckets", get(list_buckets))
         .route("/bucket", post(create_bucket))
         .route("/bucket/:name", patch(update_bucket))
         .layer(CorsLayer::permissive());
@@ -401,6 +402,11 @@ async fn cancel_order(Path(client_id): Path<String>) -> impl IntoResponse {
             (StatusCode::OK, Json(json!(lot)))
         }
     }
+}
+
+async fn list_buckets() -> impl IntoResponse {
+    let buckets = Bucket::list().unwrap();
+    (StatusCode::OK, Json(json!(buckets)))
 }
 
 #[derive(Debug, Deserialize)]
