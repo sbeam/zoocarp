@@ -25,11 +25,21 @@ migrations_append_only = [
   'ALTER TABLE lot ADD COLUMN target_order_id TEXT',
   'ALTER TABLE lot ADD COLUMN client_id TEXT',
   'ALTER TABLE lot ADD COLUMN disposed_fill_price TEXT',
+  'CREATE TABLE bucket (rowid INTEGER PRIMARY KEY) STRICT',
+  'ALTER TABLE bucket ADD COLUMN name TEXT',
+  'ALTER TABLE bucket ADD COLUMN created_at TEXT',
+  'ALTER TABLE bucket ADD COLUMN updated_at TEXT',
 ]
 output_generated_schema_for_your_information_do_not_edit = '''
   CREATE TABLE _turbosql_migrations (
     rowid INTEGER PRIMARY KEY,
     migration TEXT NOT NULL
+  ) STRICT
+  CREATE TABLE bucket (
+    rowid INTEGER PRIMARY KEY,
+    name TEXT,
+    created_at TEXT,
+    updated_at TEXT
   ) STRICT
   CREATE TABLE lot (
     rowid INTEGER PRIMARY KEY,
@@ -55,6 +65,29 @@ output_generated_schema_for_your_information_do_not_edit = '''
     disposed_fill_price TEXT
   ) STRICT
 '''
+[output_generated_tables_do_not_edit.bucket]
+name = 'bucket'
+
+[[output_generated_tables_do_not_edit.bucket.columns]]
+name = 'rowid'
+rust_type = 'Option < i64 >'
+sql_type = 'INTEGER PRIMARY KEY'
+
+[[output_generated_tables_do_not_edit.bucket.columns]]
+name = 'name'
+rust_type = 'Option < String >'
+sql_type = 'TEXT'
+
+[[output_generated_tables_do_not_edit.bucket.columns]]
+name = 'created_at'
+rust_type = 'Option < DateTime < Utc > >'
+sql_type = 'TEXT'
+
+[[output_generated_tables_do_not_edit.bucket.columns]]
+name = 'updated_at'
+rust_type = 'Option < DateTime < Utc > >'
+sql_type = 'TEXT'
+
 [output_generated_tables_do_not_edit.lot]
 name = 'lot'
 

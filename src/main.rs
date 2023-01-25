@@ -27,6 +27,9 @@ use dotenvy::dotenv;
 pub mod sync_lots;
 use sync_lots::*;
 
+pub mod bucket;
+use bucket::*;
+
 use zoocarp::*;
 
 #[tokio::main]
@@ -51,6 +54,7 @@ async fn main() {
         .route("/order", post(place_order))
         .route("/order/:id", delete(cancel_order))
         .route("/liquidate", patch(liquidate_order))
+        .route("/bucket", post(create_bucket))
         .layer(CorsLayer::permissive());
 
     // `axum::Server` is a re-export of `hyper::Server`
@@ -122,7 +126,8 @@ async fn listen_for_trade_updates() -> Result<(), tungstenite::Error> {
                         process_json_message(&text);
                     }
                     Ok(Message::Close(_msg)) => {
-                        tracing::warn!("websocket recv: CLOSE!!!!");
+                        // TODO reconnect, duh
+                        panic!("websocket recv: CLOSE!!!!");
                     }
                     Err(e) => {
                         tracing::error!("websocket error: {:?}", e);
@@ -394,5 +399,18 @@ async fn cancel_order(Path(client_id): Path<String>) -> impl IntoResponse {
             // lot.cancel().unwrap();
             (StatusCode::OK, Json(json!(lot)))
         }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct BucketInput {
+    name: String,
+}
+
+async fn create_bucket(Json(input): Json<BucketInput>) -> impl IntoResponse {
+    let bucket = Bucket::new(input.name).create();
+    match bucket {
+        Ok(b) => (StatusCode::OK, Json(json!(b))),
+        Err(e) => json_error(StatusCode::BAD_REQUEST, &e.to_string()),
     }
 }

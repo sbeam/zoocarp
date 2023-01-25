@@ -49,10 +49,13 @@ If closed
 
 [x] Bracket order impl https://alpaca.markets/docs/trading/orders/#bracket-orders
 [x] Extend apca to get latest trade (not quote) https://alpaca.markets/docs/api-references/market-data-api/stock-pricing-data/historical/#latest-trade
+[ ] Bucket orders by strategy/broker/etc
+[ ] Order manual entry
+[ ] OAuth to Alpaca
 
 ## TODO
-[ ] Shorting - does not work with bracket orders, getting `{ code: 42210000, message: "bracket orders must be entry orders" }` when trying to sell unheld stock
-[ ] clean up 404ing orders on startup_sync
+[x] Shorting - does not work with bracket orders, getting `{ code: 42210000, message: "bracket orders must be entry orders" }` when trying to sell unheld stock
+[x] clean up 404ing orders on startup_sync
 [ ] splits!
 
 Place order wf:
