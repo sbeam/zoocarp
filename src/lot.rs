@@ -281,16 +281,18 @@ impl Lot {
     }
 
     pub fn get_lots(
+        bucket_id: i64,
         page: i64,
         limit: i64,
         show_canceled: bool,
     ) -> Result<Vec<Lot>, Box<dyn Error>> {
         let lots = if show_canceled {
-            select!(Vec<Lot> "ORDER BY rowid DESC LIMIT ? OFFSET ?", limit, page * limit)?
+            select!(Vec<Lot> "WHERE bucket_id = ? ORDER BY rowid DESC LIMIT ? OFFSET ?", bucket_id, limit, page * limit)?
         } else {
             select!(
                 Vec<Lot>
-                "WHERE status = ? OR status = ? OR status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                "WHERE bucket_id = ? AND (status = ? OR status = ? OR status = ?) ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                bucket_id,
                 LotStatus::Open,
                 LotStatus::Pending,
                 LotStatus::Disposed,

@@ -211,8 +211,9 @@ async fn get_lots(Query(params): Query<HashMap<String, String>>) -> impl IntoRes
     let page = 0; // TODO: pagination
     let limit = 50;
     let show_canceled = params.contains_key("show_canceled");
+    let bucket_id = params.get("bucket_id").unwrap().parse::<i64>().unwrap();
     // TODO - filter by status (open, closed, all)
-    let lots = Lot::get_lots(page, limit, show_canceled).unwrap();
+    let lots = Lot::get_lots(bucket_id, page, limit, show_canceled).unwrap();
 
     (StatusCode::OK, Json(lots))
 }
