@@ -19,6 +19,10 @@ impl Bucket {
         }
     }
 
+    pub fn get_by_id(id: &i64) -> Result<Self, turbosql::Error> {
+        select!(Bucket "WHERE rowid = ? LIMIT 1", id)
+    }
+
     pub fn get_by_name(name: &str) -> Result<Self, turbosql::Error> {
         select!(Bucket "WHERE name = ? LIMIT 1", name)
     }

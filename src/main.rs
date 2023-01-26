@@ -221,7 +221,7 @@ async fn get_lots(Query(params): Query<HashMap<String, String>>) -> impl IntoRes
 struct OrderPlacementInput {
     sym: String,
     qty: i32,
-    bucket: String,
+    bucket_id: i64,
     limit: Option<Num>,
     stop: Option<Num>,
     target: Option<Num>,
@@ -234,7 +234,7 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
     let side = input.side.unwrap_or(lot::PositionType::Long);
 
     let qty = input.qty;
-    let bucket = Bucket::get_by_name(&input.bucket).unwrap();
+    let bucket = Bucket::get_by_id(&input.bucket_id.into()).unwrap();
 
     let lot_id = Lot::create(
         input.sym.clone(),
