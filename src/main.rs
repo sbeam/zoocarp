@@ -24,13 +24,10 @@ use num_decimal::Num;
 
 use dotenvy::dotenv;
 
-pub mod sync_lots;
-use sync_lots::*;
+use zoocarp::sync_lots::{startup_sync, sync_trade_update};
 
-pub mod bucket;
-use bucket::*;
-
-use zoocarp::*;
+use zoocarp::bucket::Bucket;
+use zoocarp::lot::{self, Lot, LotStatus};
 
 #[tokio::main]
 async fn main() {
@@ -224,23 +221,26 @@ async fn get_lots(Query(params): Query<HashMap<String, String>>) -> impl IntoRes
 struct OrderPlacementInput {
     sym: String,
     qty: i32,
+    bucket: String,
     limit: Option<Num>,
     stop: Option<Num>,
     target: Option<Num>,
-    time_in_force: Option<zoocarp::OrderTimeInForce>,
+    time_in_force: Option<lot::OrderTimeInForce>,
     market: Option<bool>,
-    side: Option<zoocarp::PositionType>,
+    side: Option<lot::PositionType>,
 }
 
 async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoResponse {
-    let side = input.side.unwrap_or(zoocarp::PositionType::Long);
+    let side = input.side.unwrap_or(lot::PositionType::Long);
 
     let qty = input.qty;
+    let bucket = Bucket::get_by_name(&input.bucket).unwrap();
 
     let lot_id = Lot::create(
         input.sym.clone(),
         Num::from(qty),
         side,
+        bucket,
         input.limit.clone(),
         input.target.clone(),
         input.stop.clone(),
@@ -263,14 +263,14 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
         stop_loss: Some(order::StopLoss::Stop(input.stop.unwrap_or_default())),
         take_profit: Some(order::TakeProfit::Limit(input.target.unwrap_or_default())),
         time_in_force: match input.time_in_force {
-            Some(zoocarp::OrderTimeInForce::Day) => order::TimeInForce::Day,
+            Some(lot::OrderTimeInForce::Day) => order::TimeInForce::Day,
             _ => order::TimeInForce::UntilCanceled,
         },
         ..Default::default()
     }
     .init(
         input.sym,
-        if side == zoocarp::PositionType::Long {
+        if side == lot::PositionType::Long {
             order::Side::Buy
         } else {
             order::Side::Sell
@@ -415,7 +415,7 @@ struct BucketInput {
 }
 
 async fn create_bucket(Json(input): Json<BucketInput>) -> impl IntoResponse {
-    let bucket = Bucket::new(input.name).create();
+    let bucket = Bucket::new(&input.name).create();
     match bucket {
         Ok(b) => (StatusCode::OK, Json(json!(b))),
         Err(e) => json_error(StatusCode::BAD_REQUEST, &e.to_string()),

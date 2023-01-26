@@ -3,7 +3,9 @@ use num_decimal::Num;
 use std::fs::read_to_string;
 use turbosql::{execute, select, Turbosql};
 use uuid::Uuid;
-use zoocarp::{sync_lots::*, Lot, LotStatus, OrderTimeInForce, PositionType};
+use zoocarp::bucket::Bucket;
+use zoocarp::lot::{Lot, LotStatus, OrderTimeInForce, PositionType};
+use zoocarp::sync_lots::*;
 
 #[cfg(test)]
 fn setup() {
@@ -12,10 +14,12 @@ fn setup() {
 
 #[cfg(test)]
 fn create_lot() -> Lot {
+    let bucket = Bucket::new("test");
     let rowid = Lot::create(
         "TEST".to_string(),
         Num::from(11),
         PositionType::Long,
+        bucket,
         Some(Num::from(101)),
         Some(Num::from(102)),
         Some(Num::from(99)),

@@ -5,7 +5,7 @@ use serde::Deserialize;
 use std::error::Error;
 use turbosql::{select, Turbosql};
 
-use crate::{Lot, LotStatus};
+use crate::lot::{Lot, LotStatus};
 
 #[derive(Deserialize)]
 struct TradeUpdateMessageRoot {

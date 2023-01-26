@@ -29,6 +29,7 @@ migrations_append_only = [
   'ALTER TABLE bucket ADD COLUMN name TEXT',
   'ALTER TABLE bucket ADD COLUMN created_at TEXT',
   'ALTER TABLE bucket ADD COLUMN updated_at TEXT',
+  'ALTER TABLE lot ADD COLUMN bucket_id INTEGER',
 ]
 output_generated_schema_for_your_information_do_not_edit = '''
   CREATE TABLE _turbosql_migrations (
@@ -62,7 +63,8 @@ output_generated_schema_for_your_information_do_not_edit = '''
     stop_order_id TEXT,
     target_order_id TEXT,
     client_id TEXT,
-    disposed_fill_price TEXT
+    disposed_fill_price TEXT,
+    bucket_id INTEGER
   ) STRICT
 '''
 [output_generated_tables_do_not_edit.bucket]
@@ -195,3 +197,8 @@ sql_type = 'TEXT'
 name = 'target_order_id'
 rust_type = 'Option < apcaOrder :: Id >'
 sql_type = 'TEXT'
+
+[[output_generated_tables_do_not_edit.lot.columns]]
+name = 'bucket_id'
+rust_type = 'Option < i64 >'
+sql_type = 'INTEGER'

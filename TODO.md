@@ -52,6 +52,7 @@ If closed
 [ ] Bucket orders by strategy/broker/etc
 [ ] Order manual entry
 [ ] OAuth to Alpaca
+[ ] websocket reconnect - [is this helpful?](https://github.com/PhotonQuantum/stream-reconnect)
 
 ## TODO
 [x] Shorting - does not work with bracket orders, getting `{ code: 42210000, message: "bracket orders must be entry orders" }` when trying to sell unheld stock
@@ -102,7 +103,19 @@ RE to F/E, authentication, RBAC. But some interesting ideas.
 
 [Structsy](https://www.structsy.rs/)
 
+[Macroquad](https://docs.rs/macroquad/latest/macroquad/) - simple 2D game engine, but I kind of want this UI
+
+[Genetic Asteroids](https://github.com/sparshg/asteroids-genetic) - built with macroquad in a few weeks apparently, sigh
+
+[Bevy](https://bevyengine.org/) - 3D game engine, but I kind of want this UI
+
+[Seed](https://seed-rs.org/) - Rust framework for creating web apps
+
+
+
+
 ## Rust
 
 https://blog.jcoglan.com/2019/04/22/generic-returns-in-rust/
+
 
