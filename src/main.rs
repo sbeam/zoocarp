@@ -54,6 +54,7 @@ async fn main() {
         .route("/buckets", get(list_buckets))
         .route("/bucket", post(create_bucket))
         .route("/bucket/:name", patch(update_bucket))
+        .route("/bucket", delete(delete_bucket))
         .layer(CorsLayer::permissive());
 
     // `axum::Server` is a re-export of `hyper::Server`
@@ -430,6 +431,14 @@ async fn update_bucket(
     let bucket = Bucket::update_name(&old_bucket_name, &input.name);
     match bucket {
         Ok(b) => (StatusCode::OK, Json(json!(b))),
+        Err(e) => json_error(StatusCode::NOT_FOUND, &e.to_string()),
+    }
+}
+
+async fn delete_bucket(Json(input): Json<BucketInput>) -> impl IntoResponse {
+    let res = Bucket::delete(&input.name);
+    match res {
+        Ok(_) => (StatusCode::OK, Json(json!("ok"))),
         Err(e) => json_error(StatusCode::NOT_FOUND, &e.to_string()),
     }
 }

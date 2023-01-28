@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use turbosql::{select, Turbosql};
+use turbosql::{execute, select, Turbosql};
 
 #[derive(Debug, Serialize, Turbosql, Default, Clone)]
 pub struct Bucket {
@@ -8,6 +8,13 @@ pub struct Bucket {
     pub name: Option<String>,
     pub created_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Serialize, Default)]
+pub struct BucketWithStats {
+    pub rowid: Option<i64>,
+    pub name: Option<String>,
+    pub lot_count: Option<i64>,
 }
 
 impl Bucket {
@@ -27,8 +34,8 @@ impl Bucket {
         select!(Bucket "WHERE name = ? LIMIT 1", name)
     }
 
-    pub fn list() -> Result<Vec<Bucket>, turbosql::Error> {
-        let bs = select!(Vec<Bucket> "ORDER BY updated_at DESC");
+    pub fn list() -> Result<Vec<BucketWithStats>, turbosql::Error> {
+        let bs = select!(Vec<BucketWithStats> "SELECT b.rowid, b.name, count(lot.rowid) AS lot_count FROM bucket b LEFT JOIN lot on lot.bucket_id = b.rowid GROUP BY b.rowid ORDER BY updated_at DESC");
         match bs {
             Ok(b) => Ok(b),
             Err(e) => Err(e),
@@ -44,6 +51,7 @@ impl Bucket {
             Err("Bucket already exists".into())
         }
     }
+
     pub fn update_name(old_name: &str, name: &str) -> Result<Bucket, Box<dyn std::error::Error>> {
         let bucket = select!(Bucket "WHERE name = ?", old_name);
         match bucket {
@@ -53,6 +61,24 @@ impl Bucket {
                 bucket.updated_at = Some(Utc::now());
                 bucket.update()?;
                 Ok(bucket)
+            }
+            Err(_) => Err("Bucket does not exist".into()),
+        }
+    }
+
+    pub fn delete(name: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let bucket = Self::get_by_name(name);
+        match bucket {
+            Ok(bucket) => {
+                let lots =
+                    select!(i64 "SELECT COUNT(*) FROM lot WHERE bucket_id = ?", bucket.rowid);
+                if lots.unwrap() > 0 {
+                    return Err("Bucket is not empty".into());
+                } else {
+                    execute!("DELETE FROM bucket WHERE rowid = ?", bucket.rowid)?;
+                }
+
+                Ok(())
             }
             Err(_) => Err("Bucket does not exist".into()),
         }
