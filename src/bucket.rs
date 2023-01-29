@@ -35,7 +35,7 @@ impl Bucket {
     }
 
     pub fn list() -> Result<Vec<BucketWithStats>, turbosql::Error> {
-        let bs = select!(Vec<BucketWithStats> "SELECT b.rowid, b.name, count(lot.rowid) AS lot_count FROM bucket b LEFT JOIN lot on lot.bucket_id = b.rowid GROUP BY b.rowid ORDER BY updated_at DESC");
+        let bs = select!(Vec<BucketWithStats> "SELECT b.rowid, b.name, count(lot.rowid) AS lot_count FROM bucket b LEFT JOIN lot on lot.bucket_id = b.rowid GROUP BY b.rowid ORDER BY b.created_at");
         match bs {
             Ok(b) => Ok(b),
             Err(e) => Err(e),
