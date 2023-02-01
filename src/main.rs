@@ -57,7 +57,7 @@ async fn main() {
         .route("/bucket", delete(delete_bucket))
         .layer(CorsLayer::permissive());
 
-    // `axum::Server` is a re-export of `hyper::Server`
+    // run it
     let addr = SocketAddr::from(([127, 0, 0, 1], 3001));
     tracing::debug!("listening on {}", addr);
     axum::Server::bind(&addr)

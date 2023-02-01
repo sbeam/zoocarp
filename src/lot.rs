@@ -1,4 +1,5 @@
 use crate::bucket::Bucket;
+use crate::sync_lots::LotUpdateNotice;
 
 use apca::api::v2::order as apcaOrder;
 use chrono::DateTime;
@@ -12,7 +13,7 @@ use turbosql::{select, ToSql, ToSqlOutput, Turbosql};
 use uuid::Uuid;
 
 /// The status a lot can have.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum LotStatus {
     /// The order is awaiting fulfillment or partial fullfillment.
     Pending,
@@ -35,7 +36,7 @@ impl ToSql for LotStatus {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum DisposeReason {
     /// The lot was manually disposed of.
     Liquidation,
@@ -45,7 +46,7 @@ pub enum DisposeReason {
     Profit,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, Eq)]
 pub enum PositionType {
     #[default]
     Long,
@@ -53,7 +54,7 @@ pub enum PositionType {
 }
 
 /// A description of the time for which an order is valid.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum OrderTimeInForce {
     /// The order is good for the day, and it will be canceled
     /// automatically at the end of Regular Trading Hours if unfilled.
@@ -64,7 +65,7 @@ pub enum OrderTimeInForce {
     UntilCanceled,
 }
 
-#[derive(Debug, Serialize, Turbosql, Default, Clone)]
+#[derive(Debug, Serialize, Turbosql, Default, Clone, Eq, PartialEq)]
 pub struct Lot {
     /// DB row ID
     pub rowid: Option<i64>,
@@ -189,7 +190,12 @@ impl Lot {
         Ok(())
     }
 
-    pub fn fill_with(&mut self, order: &apcaOrder::Order) -> Result<&mut Self, turbosql::Error> {
+    pub fn fill_with(
+        &mut self,
+        order: &apcaOrder::Order,
+        tx: &mut futures::channel::mpsc::Sender<LotUpdateNotice>,
+    ) -> Result<&mut Self, turbosql::Error> {
+        let orig_lot = self.clone();
         let qty = order.filled_quantity.clone();
 
         self.set_status_from(&order.status);
@@ -240,7 +246,14 @@ impl Lot {
             )
             .unwrap();
         };
-        self.update()?;
+        if orig_lot != *self {
+            self.update()?;
+            tx.try_send(LotUpdateNotice {
+                rowid: self.rowid,
+                sym: self.sym.clone().unwrap(),
+                order_id: self.client_id.clone(),
+            });
+        }
         Ok(self)
     }
 

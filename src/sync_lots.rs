@@ -23,6 +23,12 @@ struct TradeUpdateMessageData {
     order: order::Order,
 }
 
+#[derive(Debug)]
+pub struct LotUpdateNotice {
+    pub sym: String,
+    pub rowid: Option<i64>,
+    pub order_id: Option<String>,
+}
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 enum Event {
     #[serde(rename = "new")]
