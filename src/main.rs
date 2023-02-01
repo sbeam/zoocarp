@@ -5,13 +5,11 @@ use axum::{
     routing::*,
     Json, Router,
 };
-use futures::future;
-use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::json;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+use async_trait::async_trait;
 use tower_http::cors::CorsLayer;
 
 use apca::api::v2::{order, positions};
@@ -66,81 +64,70 @@ async fn main() {
         .unwrap();
 }
 
+struct SocketClient {}
+
+impl SocketClient {
+    fn process_json_message(text_msg: &str) {
+        tracing::info!("websocket recv: {}", text_msg);
+        let resp: Result<serde_json::Value, serde_json::Error> = serde_json::from_str(&text_msg);
+        match resp {
+            Ok(content) => {
+                if content["data"].get("event").is_some() {
+                    let res = sync_trade_update(&text_msg);
+                    if let Err(e) = res {
+                        tracing::error!("error syncing trade update: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("could not deserialize message: {}", e);
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl ezsockets::ClientExt for SocketClient {
+    type Params = ();
+
+    async fn text(&mut self, text: String) -> Result<(), ezsockets::Error> {
+        tracing::info!("AlpacaSocketClient recv: {text}");
+        SocketClient::process_json_message(&text);
+        Ok(())
+    }
+
+    async fn binary(&mut self, bytes: Vec<u8>) -> Result<(), ezsockets::Error> {
+        tracing::info!("received {:?} bytes", bytes.len());
+        let text = String::from_utf8_lossy(&bytes);
+        SocketClient::process_json_message(&text);
+        Ok(())
+    }
+
+    async fn call(&mut self, params: Self::Params) -> Result<(), ezsockets::Error> {
+        tracing::info!("received params: {params:?}");
+        let () = params;
+        Ok(())
+    }
+}
+
 async fn listen_for_trade_updates() -> Result<(), tungstenite::Error> {
     let api_info = ApiInfo::from_env().unwrap();
 
     let mut url = api_info.data_stream_base_url;
     url.set_path("/stream");
 
-    let (socket, _response) = connect_async(url).await.expect("Can't connect");
-    tracing::info!("WebSocket handshake has been successfully completed");
+    let config = ezsockets::ClientConfig::new(url);
 
-    let (mut writer, reader) = socket.split();
+    let (client, future) = ezsockets::connect(|_client| SocketClient {}, config).await;
+    tokio::spawn(async move {
+        future.await.unwrap();
+    });
 
     let auth =
         json!({ "action": "auth", "key": api_info.key_id, "secret": api_info.secret }).to_string();
-    writer.send(Message::text(auth)).await?;
+    client.text(auth);
 
-    writer
-        .send(Message::Text(
-            r#"{ "action": "listen", "data": { "streams": ["trade_updates"] } }"#.into(),
-        ))
-        .await?;
-
-    let _handle = tokio::spawn(async move {
-        let process_json_message = |text_msg: &str| {
-            tracing::info!("websocket recv: {}", text_msg);
-            let resp: Result<serde_json::Value, serde_json::Error> =
-                serde_json::from_str(&text_msg);
-            match resp {
-                Ok(content) => {
-                    if content["data"].get("event").is_some() {
-                        let res = sync_trade_update(&text_msg);
-                        if let Err(e) = res {
-                            tracing::error!("error syncing trade update: {}", e);
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!("could not deserialize message: {}", e);
-                }
-            }
-        };
-
-        reader
-            .for_each(|message| async move {
-                match message {
-                    Ok(Message::Ping(_msg)) => {
-                        tracing::info!("websocket recv: ping");
-                    }
-                    Ok(Message::Pong(_msg)) => {
-                        tracing::info!("websocket recv: PONG");
-                    }
-                    Ok(Message::Text(msg)) => {
-                        let text_msg = msg.to_string();
-                        process_json_message(&text_msg);
-                    }
-                    Ok(Message::Binary(msg)) => {
-                        tracing::info!("websocket recv: binary");
-                        let text = String::from_utf8_lossy(&msg);
-                        process_json_message(&text);
-                    }
-                    Ok(Message::Close(_msg)) => {
-                        // TODO reconnect, duh
-                        panic!("websocket recv: CLOSE!!!!");
-                    }
-                    Err(e) => {
-                        tracing::error!("websocket error: {:?}", e);
-                    }
-                    _ => {
-                        tracing::info!("websocket recv: unknown {:?}", message);
-                    }
-                }
-            })
-            .await;
-
-        tracing::info!("websocket: stream ended");
-    });
+    client.text(r#"{ "action": "listen", "data": { "streams": ["trade_updates"] } }"#.into());
 
     Ok(())
 }
@@ -359,7 +346,7 @@ async fn liquidate_order(Json(input): Json<OrderLiquidationInput>) -> impl IntoR
                     .into_iter()
                     .filter(|leg| !leg.status.is_terminal())
                     .map(|leg| client.issue::<order::Delete>(&leg.id));
-                future::join_all(open_legs).await;
+                futures::future::join_all(open_legs).await;
             }
 
             if retrieved.status.is_terminal() {

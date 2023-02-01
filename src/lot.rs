@@ -190,11 +190,7 @@ impl Lot {
         Ok(())
     }
 
-    pub fn fill_with(
-        &mut self,
-        order: &apcaOrder::Order,
-        tx: &mut futures::channel::mpsc::Sender<LotUpdateNotice>,
-    ) -> Result<&mut Self, turbosql::Error> {
+    pub fn fill_with(&mut self, order: &apcaOrder::Order) -> Result<&mut Self, turbosql::Error> {
         let orig_lot = self.clone();
         let qty = order.filled_quantity.clone();
 
@@ -248,11 +244,6 @@ impl Lot {
         };
         if orig_lot != *self {
             self.update()?;
-            tx.try_send(LotUpdateNotice {
-                rowid: self.rowid,
-                sym: self.sym.clone().unwrap(),
-                order_id: self.client_id.clone(),
-            });
         }
         Ok(self)
     }

@@ -7,10 +7,12 @@ edition = "2021"
 
 [dependencies]
 apca = { path = "../apca", version = "0.25.1" }
+async-trait = "0.1.64"
 axum = "0.5.16"
 axum-macros = "0.2.3"
 chrono = "0.4.22"
 dotenvy = "0.15.5"
+ezsockets = { version = "0.4.0", features = ["axum"] }
 futures = "0.3.24"
 futures-util = "0.3.25"
 http-endpoint = "0.5.0"
@@ -21,6 +23,7 @@ strum = { version = "0.24.1", features = ["strum_macros", "derive"] }
 tokio = { version = "1.0", features = ["full"] }
 tokio-tungstenite = { version = "0.18.0", features = ["native-tls"] }
 tower-http = { version = "0.3.4", features = ["cors"] }
+tower-layer = "0.3.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tungstenite = { version = "0.18.0", features = ["native-tls"] }
