@@ -50,7 +50,10 @@ enum Event {
 }
 
 // process a trade_update message
-pub fn sync_trade_update(msg: &str) -> Result<(), Box<dyn Error>> {
+pub fn sync_trade_update(
+    msg: &str,
+    tx: &mut futures::channel::mpsc::Sender<LotUpdateNotice>,
+) -> Result<(), Box<dyn Error>> {
     let update_message: TradeUpdateMessageRoot = serde_json::from_str(msg)?;
     if update_message.stream != "trade_updates" {
         return Ok(());
@@ -70,6 +73,11 @@ pub fn sync_trade_update(msg: &str) -> Result<(), Box<dyn Error>> {
             lot.filled_avg_price = order.average_fill_price.clone();
             lot.set_cost_basis(&order.filled_quantity, &order.average_fill_price);
             lot.update().expect("failed to update lot");
+            tx.try_send(LotUpdateNotice {
+                sym: lot.sym.clone().unwrap(),
+                rowid: lot.rowid,
+                order_id: lot.client_id,
+            })?;
         }
         _ => {
             tracing::warn!(
@@ -82,7 +90,9 @@ pub fn sync_trade_update(msg: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-pub async fn startup_sync() -> Result<(), Box<dyn Error>> {
+pub async fn startup_sync(
+    tx: &mut futures::channel::mpsc::Sender<LotUpdateNotice>,
+) -> Result<(), Box<dyn Error>> {
     let api_info = ApiInfo::from_env().unwrap();
     let client = Client::new(api_info);
     let mut open_lots = select!(
@@ -102,7 +112,7 @@ pub async fn startup_sync() -> Result<(), Box<dyn Error>> {
                 .await;
             match alpaca_order {
                 Ok(order) => {
-                    lot.fill_with(&order)
+                    lot.fill_with(&order, &mut tx.clone())
                         .expect("failed to fill lot with order");
                 }
                 Err(e) => {

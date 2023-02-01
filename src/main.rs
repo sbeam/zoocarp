@@ -1,9 +1,9 @@
 use axum::{
-    extract::{Path, Query},
+    extract::{Path, Query, Extension},
     http::StatusCode,
     response::IntoResponse,
     routing::*,
-    Json, Router,
+    Json, Router
 };
 use futures::future;
 use futures::{SinkExt, StreamExt};
@@ -24,10 +24,15 @@ use num_decimal::Num;
 
 use dotenvy::dotenv;
 
-use zoocarp::sync_lots::{startup_sync, sync_trade_update};
+use zoocarp::sync_lots::{startup_sync, sync_trade_update, LotUpdateNotice};
 
 use zoocarp::bucket::Bucket;
 use zoocarp::lot::{self, Lot, LotStatus};
+
+#[derive(Clone)]
+struct AppState {
+    updates_channel: futures::channel::mpsc::UnboundedSender<LotUpdateNotice>,
+}
 
 #[tokio::main]
 async fn main() {
@@ -35,11 +40,19 @@ async fn main() {
     // initialize tracing, RUST_LOG=debug
     tracing_subscriber::fmt::init();
 
-    // Updates status/pricing of any non-final orders via API
-    startup_sync().await.unwrap();
+    let (tx, mut rx) = futures::channel::mpsc::unbounded::<LotUpdateNotice>();
 
-    // Subscribe to trade_updates
-    listen_for_trade_updates().await.unwrap();
+    // poll for trade updates every 10 minutes
+    tokio::spawn(async move {
+        loop {
+            // Updates status/pricing of any non-final orders via API
+            startup_sync(&mut tx).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_secs(600)).await;
+        }
+    });
+
+    // Subscribe to trade_updates via WS (disconnects after 10 minutes of inactivity)
+    listen_for_trade_updates(&mut tx.clone()).await.unwrap();
 
     // build our application with a route
     let app = Router::new()
@@ -55,6 +68,9 @@ async fn main() {
         .route("/bucket", post(create_bucket))
         .route("/bucket/:name", patch(update_bucket))
         .route("/bucket", delete(delete_bucket))
+        .with_state(AppState {
+            updates_channel: tx,
+        })
         .layer(CorsLayer::permissive());
 
     // run it
@@ -66,7 +82,9 @@ async fn main() {
         .unwrap();
 }
 
-async fn listen_for_trade_updates() -> Result<(), tungstenite::Error> {
+async fn listen_for_trade_updates(
+    tx: &mut futures::channel::mpsc::Sender<LotUpdateNotice>,
+) -> Result<(), tungstenite::Error> {
     let api_info = ApiInfo::from_env().unwrap();
 
     let mut url = api_info.data_stream_base_url;
@@ -95,7 +113,7 @@ async fn listen_for_trade_updates() -> Result<(), tungstenite::Error> {
             match resp {
                 Ok(content) => {
                     if content["data"].get("event").is_some() {
-                        let res = sync_trade_update(&text_msg);
+                        let res = sync_trade_update(&text_msg, tx);
                         if let Err(e) = res {
                             tracing::error!("error syncing trade update: {}", e);
                         }
@@ -232,6 +250,7 @@ struct OrderPlacementInput {
     side: Option<lot::PositionType>,
 }
 
+// take a channel, and return a async fn that can be used as a handler and use the channel
 async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoResponse {
     let side = input.side.unwrap_or(lot::PositionType::Long);
 
@@ -284,7 +303,7 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
         Ok(order) => {
             tracing::debug!("Created order {}", order.id.as_hyphenated());
 
-            lot.fill_with(&order).unwrap();
+            lot.fill_with(&order, tx).unwrap();
             tracing::debug!(
                 ">>> New order: {:?} => {:?}",
                 order.id.as_hyphenated().to_string(),
