@@ -1,4 +1,4 @@
-use crate::sync_lots::sync_trade_update;
+use crate::{sync_lots::sync_trade_update, update_server::UpdateNotification};
 use apca::ApiInfo;
 use async_trait::async_trait;
 use serde_json::json;
@@ -49,7 +49,7 @@ impl ezsockets::ClientExt for SocketClient {
     }
 }
 
-pub async fn listen_for_trade_updates() -> Result<(), tungstenite::Error> {
+pub async fn listen_for_trade_updates(tx: tokio::sync::mpsc::Sender<UpdateNotification>) -> Result<(), tungstenite::Error> {
     let api_info = ApiInfo::from_env().unwrap();
 
     let mut url = api_info.data_stream_base_url;

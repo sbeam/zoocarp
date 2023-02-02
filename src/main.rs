@@ -3,7 +3,7 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
     routing::*,
-    Json, Router,
+    Extension, Json, Router,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -21,11 +21,11 @@ use num_decimal::Num;
 
 use dotenvy::dotenv;
 
+use zoocarp::lot::{self, Lot, LotStatus};
 use zoocarp::sync_lots::startup_sync;
 use zoocarp::trade_update_client::listen_for_trade_updates;
-
-use zoocarp::bucket::Bucket;
-use zoocarp::lot::{self, Lot, LotStatus};
+use zoocarp::update_server::UpdateServer;
+use zoocarp::{bucket::Bucket, update_server::UpdateNotification};
 
 #[tokio::main]
 async fn main() {
@@ -33,11 +33,20 @@ async fn main() {
     // initialize tracing, RUST_LOG=debug
     tracing_subscriber::fmt::init();
 
+    // create mpsc unbounded channel for trade updates with UpdateNotification
+    let (tx, rx) = tokio::sync::mpsc::channel::<UpdateNotification>(1024);
+
     // Updates status/pricing of any non-final orders via API
     startup_sync().await.unwrap();
 
     // Subscribe to trade_updates
-    listen_for_trade_updates().await.unwrap();
+    listen_for_trade_updates(tx).await.unwrap();
+
+    // create a ws server
+    let (server, _future) = ezsockets::Server::create(|handle| UpdateServer {
+        sessions: HashMap::new(),
+        handle,
+    });
 
     // build our application with a route
     let app = Router::new()
@@ -53,6 +62,7 @@ async fn main() {
         .route("/bucket", post(create_bucket))
         .route("/bucket/:name", patch(update_bucket))
         .route("/bucket", delete(delete_bucket))
+        .layer(Extension(server.clone()))
         .layer(CorsLayer::permissive());
 
     // run it
