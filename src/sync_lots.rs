@@ -6,7 +6,6 @@ use std::error::Error;
 use turbosql::{select, Turbosql};
 
 use crate::lot::{Lot, LotStatus};
-use crate::update_server::UpdateNotification;
 
 #[derive(Deserialize)]
 struct TradeUpdateMessageRoot {
