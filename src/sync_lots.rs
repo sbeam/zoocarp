@@ -1,12 +1,11 @@
 use apca::api::v2::order;
 use apca::{ApiInfo, Client};
 use futures::future::join_all;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 use turbosql::{select, Turbosql};
 
 use crate::lot::{Lot, LotStatus};
-use crate::trade_update_client::ChannelSink;
 
 #[derive(Deserialize)]
 struct TradeUpdateMessageRoot {
@@ -24,13 +23,13 @@ struct TradeUpdateMessageData {
     order: order::Order,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct LotUpdateNotice {
     pub lot: Lot,
     pub event: LotUpdateEvent,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub enum LotUpdateEvent {
     #[serde(rename = "new")]
     New,

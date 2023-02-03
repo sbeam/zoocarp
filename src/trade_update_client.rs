@@ -9,6 +9,7 @@ use crate::sync_lots::{sync_trade_update, LotUpdateNotice};
 type WssStream = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
 pub type ChannelSink = async_channel::Sender<LotUpdateNotice>;
+pub type ChannelDrain = async_channel::Receiver<LotUpdateNotice>;
 
 pub async fn listen_for_trade_updates(tx: ChannelSink) -> Result<(), tungstenite::Error> {
     let api_info = ApiInfo::from_env().unwrap();

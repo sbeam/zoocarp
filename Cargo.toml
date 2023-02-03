@@ -9,7 +9,7 @@ edition = "2021"
 apca = { path = "../apca", version = "0.25.1" }
 async-channel = "1.8.0"
 async-trait = "0.1.64"
-axum = "0.5.16"
+axum = { version = "0.5.16", features = ["ws"] }
 axum-macros = "0.2.3"
 chrono = "0.4.22"
 dotenvy = "0.15.5"

@@ -1,4 +1,5 @@
 use axum::{
+    extract::ws::WebSocketUpgrade,
     extract::{Path, Query},
     http::StatusCode,
     response::IntoResponse,
@@ -9,7 +10,6 @@ use serde::Deserialize;
 use serde_json::json;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 
 use apca::api::v2::{order, positions};
@@ -25,7 +25,13 @@ use dotenvy::dotenv;
 use zoocarp::bucket::Bucket;
 use zoocarp::lot::{self, Lot, LotStatus};
 use zoocarp::sync_lots::{startup_sync, LotUpdateEvent, LotUpdateNotice};
-use zoocarp::trade_update_client::{listen_for_trade_updates, ChannelSink};
+use zoocarp::trade_update_client::{listen_for_trade_updates, ChannelDrain, ChannelSink};
+
+#[derive(Clone)]
+struct State {
+    lot_update_sink: ChannelSink,
+    lot_update_drain: ChannelDrain,
+}
 
 #[tokio::main]
 async fn main() {
@@ -34,7 +40,7 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     // create mpsc unbounded channel for trade updates with LotUpdateNotice
-    let (update_tx, _update_rx) = async_channel::unbounded();
+    let (update_tx, update_rx) = async_channel::unbounded();
 
     // Updates status/pricing of any non-final orders via API
     startup_sync().await.unwrap();
@@ -56,7 +62,11 @@ async fn main() {
         .route("/bucket", post(create_bucket))
         .route("/bucket/:name", patch(update_bucket))
         .route("/bucket", delete(delete_bucket))
-        .layer(Extension(update_tx))
+        .route("/ws", get(ws_handler))
+        .layer(Extension(State {
+            lot_update_sink: update_tx,
+            lot_update_drain: update_rx,
+        }))
         .layer(CorsLayer::permissive());
 
     // run it
@@ -66,6 +76,22 @@ async fn main() {
         .serve(app.into_make_service())
         .await
         .unwrap();
+}
+
+async fn ws_handler(ws: WebSocketUpgrade, Extension(state): Extension<State>) -> impl IntoResponse {
+    ws.on_upgrade(|mut socket| async move {
+        while let Ok(msg) = state.lot_update_drain.recv().await {
+            tracing::debug!("Drained lot update: {:?}", msg);
+            if socket
+                .send(axum::extract::ws::Message::Text(json!(msg).to_string()))
+                .await
+                .is_err()
+            {
+                tracing::error!("ws_handler: Failed to send message. Probably should reconnect.");
+                break;
+            }
+        }
+    })
 }
 
 fn alpaca_client() -> Client {
@@ -157,7 +183,7 @@ struct OrderPlacementInput {
 
 async fn place_order(
     Json(input): Json<OrderPlacementInput>,
-    update_chan: Extension<Arc<ChannelSink>>,
+    state: Extension<State>,
 ) -> impl IntoResponse {
     let side = input.side.unwrap_or(lot::PositionType::Long);
 
@@ -211,8 +237,8 @@ async fn place_order(
             tracing::debug!("Created order {}", order.id.as_hyphenated());
 
             lot.fill_with(&order).unwrap();
-            update_chan
-                .0
+            state
+                .lot_update_sink
                 .send(LotUpdateNotice {
                     event: LotUpdateEvent::New,
                     lot: lot.clone(),
