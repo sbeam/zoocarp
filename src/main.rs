@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 
 use apca::api::v2::{order, positions};
@@ -23,8 +24,8 @@ use dotenvy::dotenv;
 
 use zoocarp::bucket::Bucket;
 use zoocarp::lot::{self, Lot, LotStatus};
-use zoocarp::sync_lots::startup_sync;
-use zoocarp::trade_update_client::listen_for_trade_updates;
+use zoocarp::sync_lots::{startup_sync, LotUpdateEvent, LotUpdateNotice};
+use zoocarp::trade_update_client::{listen_for_trade_updates, ChannelSink};
 
 #[tokio::main]
 async fn main() {
@@ -32,14 +33,14 @@ async fn main() {
     // initialize tracing, RUST_LOG=debug
     tracing_subscriber::fmt::init();
 
-    // create mpsc unbounded channel for trade updates with UpdateNotification
+    // create mpsc unbounded channel for trade updates with LotUpdateNotice
     let (update_tx, _update_rx) = async_channel::unbounded();
 
     // Updates status/pricing of any non-final orders via API
     startup_sync().await.unwrap();
 
     // Subscribe to trade_updates
-    listen_for_trade_updates(update_tx).await.unwrap();
+    listen_for_trade_updates(update_tx.clone()).await.unwrap();
 
     // build our application with a route
     let app = Router::new()
@@ -55,7 +56,7 @@ async fn main() {
         .route("/bucket", post(create_bucket))
         .route("/bucket/:name", patch(update_bucket))
         .route("/bucket", delete(delete_bucket))
-        // .layer(Extension(server.clone()))
+        .layer(Extension(update_tx))
         .layer(CorsLayer::permissive());
 
     // run it
@@ -154,7 +155,10 @@ struct OrderPlacementInput {
     side: Option<lot::PositionType>,
 }
 
-async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoResponse {
+async fn place_order(
+    Json(input): Json<OrderPlacementInput>,
+    update_chan: Extension<Arc<ChannelSink>>,
+) -> impl IntoResponse {
     let side = input.side.unwrap_or(lot::PositionType::Long);
 
     let qty = input.qty;
@@ -207,6 +211,15 @@ async fn place_order(Json(input): Json<OrderPlacementInput>) -> impl IntoRespons
             tracing::debug!("Created order {}", order.id.as_hyphenated());
 
             lot.fill_with(&order).unwrap();
+            update_chan
+                .0
+                .send(LotUpdateNotice {
+                    event: LotUpdateEvent::New,
+                    lot: lot.clone(),
+                })
+                .await
+                .unwrap();
+
             tracing::debug!(
                 ">>> New order: {:?} => {:?}",
                 order.id.as_hyphenated().to_string(),

@@ -1,5 +1,4 @@
 use crate::bucket::Bucket;
-use crate::sync_lots::LotUpdateNotice;
 
 use apca::api::v2::order as apcaOrder;
 use chrono::DateTime;

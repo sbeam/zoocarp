@@ -6,6 +6,7 @@ use std::error::Error;
 use turbosql::{select, Turbosql};
 
 use crate::lot::{Lot, LotStatus};
+use crate::trade_update_client::ChannelSink;
 
 #[derive(Deserialize)]
 struct TradeUpdateMessageRoot {
@@ -15,7 +16,7 @@ struct TradeUpdateMessageRoot {
 
 #[derive(Deserialize)]
 struct TradeUpdateMessageData {
-    event: Event,
+    event: LotUpdateEvent,
     // execution_id: String,
     // timestamp: DateTime<Utc>,
     // price: Num,
@@ -25,12 +26,12 @@ struct TradeUpdateMessageData {
 
 #[derive(Debug)]
 pub struct LotUpdateNotice {
-    pub sym: String,
-    pub rowid: Option<i64>,
-    pub order_id: Option<String>,
+    pub lot: Lot,
+    pub event: LotUpdateEvent,
 }
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
-enum Event {
+pub enum LotUpdateEvent {
     #[serde(rename = "new")]
     New,
     #[serde(rename = "fill")]
@@ -50,13 +51,13 @@ enum Event {
 }
 
 // process a trade_update message
-pub fn sync_trade_update(msg: &str) -> Result<(), Box<dyn Error>> {
+pub fn sync_trade_update(msg: &str) -> Result<Option<LotUpdateNotice>, Box<dyn Error>> {
     let update_message: TradeUpdateMessageRoot = serde_json::from_str(msg)?;
     if update_message.stream != "trade_updates" {
-        return Ok(());
+        return Ok(None);
     }
     match update_message.data.event {
-        Event::Fill | Event::PartialFill => {
+        LotUpdateEvent::Fill | LotUpdateEvent::PartialFill => {
             let order = update_message.data.order;
             let mut lot = Lot::get_by_client_id(&order.client_order_id)?;
             lot.set_status_from(&order.status);
@@ -70,16 +71,19 @@ pub fn sync_trade_update(msg: &str) -> Result<(), Box<dyn Error>> {
             lot.filled_avg_price = order.average_fill_price.clone();
             lot.set_cost_basis(&order.filled_quantity, &order.average_fill_price);
             lot.update().expect("failed to update lot");
+            Ok(Some(LotUpdateNotice {
+                lot,
+                event: update_message.data.event,
+            }))
         }
         _ => {
             tracing::warn!(
                 "sync_trade_update: ignoring event {:?}",
                 update_message.data.event
             );
+            Ok(None)
         }
     }
-
-    Ok(())
 }
 
 pub async fn startup_sync() -> Result<(), Box<dyn Error>> {

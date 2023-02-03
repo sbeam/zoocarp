@@ -4,17 +4,11 @@ use serde_json::json;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 
-use crate::lot::Lot;
-use crate::sync_lots::sync_trade_update;
+use crate::sync_lots::{sync_trade_update, LotUpdateNotice};
 
 type WssStream = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
-type ChannelSink = async_channel::Sender<UpdateNotification>;
-
-pub struct UpdateNotification {
-    pub event: String,
-    pub lot: Lot,
-}
+pub type ChannelSink = async_channel::Sender<LotUpdateNotice>;
 
 pub async fn listen_for_trade_updates(tx: ChannelSink) -> Result<(), tungstenite::Error> {
     let api_info = ApiInfo::from_env().unwrap();
@@ -35,52 +29,62 @@ pub async fn listen_for_trade_updates(tx: ChannelSink) -> Result<(), tungstenite
     Ok(())
 }
 
-async fn read_messages(mut read_sink: SplitStream<WssStream>, _send_sink: ChannelSink) {
-    let process_json_message = |text_msg: &str| {
-        tracing::info!("websocket recv: {}", text_msg);
-        let resp: Result<serde_json::Value, serde_json::Error> = serde_json::from_str(&text_msg);
-        match resp {
-            Ok(content) => {
-                if content["data"].get("event").is_some() {
-                    let res = sync_trade_update(&text_msg);
-                    if let Err(e) = res {
-                        tracing::error!("error syncing trade update: {}", e);
-                    }
+async fn process_json_message<'a>(
+    text_msg: &str,
+    update_sink: &'a ChannelSink,
+) -> Option<Result<impl Send + 'a, Box<dyn std::error::Error>>> {
+    tracing::info!("websocket recv: {}", text_msg);
+    let resp: Result<serde_json::Value, serde_json::Error> = serde_json::from_str(&text_msg);
+    match resp {
+        Ok(content) => {
+            if content["data"].get("event").is_some() {
+                match sync_trade_update(&text_msg) {
+                    Err(e) => Some(Err(e)),
+                    Ok(notice) => Some(Ok(update_sink.send(notice.unwrap()))),
                 }
-            }
-            Err(e) => {
-                tracing::warn!("could not deserialize message: {}", e);
+            } else {
+                None
             }
         }
-    };
+        Err(e) => Some(Err(Box::new(e))),
+    }
+}
 
+async fn read_messages(mut read_sink: SplitStream<WssStream>, update_sink: ChannelSink) {
     while let Some(message) = read_sink.next().await {
-        match message {
+        let res = match message {
             Ok(Message::Ping(_msg)) => {
                 tracing::info!("websocket recv: ping");
+                None
             }
             Ok(Message::Pong(_msg)) => {
                 tracing::info!("websocket recv: PONG");
+                None
             }
             Ok(Message::Text(msg)) => {
                 let text_msg = msg.to_string();
-                process_json_message(&text_msg);
+                process_json_message(&text_msg, &update_sink).await
             }
             Ok(Message::Binary(msg)) => {
                 tracing::info!("websocket recv: {} bytes", msg.len());
                 let text = String::from_utf8_lossy(&msg);
-                process_json_message(&text);
+                process_json_message(&text, &update_sink).await
             }
             Ok(Message::Close(_msg)) => {
                 // TODO reconnect, duh
-                panic!("websocket recv: CLOSE!!!!");
+                Some(Err("websocket recv: close".into()))
             }
-            Err(e) => {
-                tracing::error!("websocket error: {:?}", e);
-            }
+            Err(e) => Some(Err(e.into())),
             _ => {
                 tracing::info!("websocket recv: unknown {:?}", message);
+                None
             }
+        };
+
+        match res {
+            Some(Err(e)) => tracing::error!("error processing message: {:?}", e),
+            Some(_result) => (),
+            None => (),
         }
     }
 }
