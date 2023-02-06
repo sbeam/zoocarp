@@ -42,8 +42,13 @@ async fn main() {
     // create mpsc unbounded channel for trade updates with LotUpdateNotice
     let (update_tx, update_rx) = async_channel::unbounded();
 
-    // Updates status/pricing of any non-final orders via API
-    startup_sync().await.unwrap();
+    // spawn thread to poll startup_sync every 15 minutes
+    tokio::spawn(async move {
+        loop {
+            startup_sync().await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_secs(900)).await;
+        }
+    });
 
     // Subscribe to trade_updates
     listen_for_trade_updates(update_tx.clone()).await.unwrap();
