@@ -1,5 +1,8 @@
 use apca::ApiInfo;
-use futures_util::{stream::SplitStream, SinkExt, StreamExt};
+use futures_util::{
+    stream::{SplitSink, SplitStream},
+    SinkExt, StreamExt,
+};
 use serde_json::json;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
@@ -18,9 +21,11 @@ pub async fn listen_for_trade_updates(tx: ChannelSink) -> Result<(), tungstenite
     url.set_path("/stream");
 
     match connect_and_authorize(&url, &api_info).await {
-        Ok(reader) => {
+        Ok((reader, writer)) => {
             tracing::info!("Connected to trade updates stream");
             let _handle = tokio::task::spawn(read_messages(reader, tx));
+            // TODO: log error if handle is disconnected
+            let _ping = tokio::task::spawn(ping_loop(writer));
         }
         Err(e) => {
             tracing::error!("Websocket connection failed: {}", e);
@@ -28,6 +33,15 @@ pub async fn listen_for_trade_updates(tx: ChannelSink) -> Result<(), tungstenite
     };
 
     Ok(())
+}
+
+async fn ping_loop(mut writer: SplitSink<WssStream, Message>) {
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+    loop {
+        tracing::debug!("websocket send: ping");
+        writer.send(Message::Ping(vec![])).await.unwrap();
+        interval.tick().await;
+    }
 }
 
 async fn process_json_message<'a>(
@@ -93,7 +107,7 @@ async fn read_messages(mut read_sink: SplitStream<WssStream>, update_sink: Chann
 async fn connect_and_authorize(
     url: &url::Url,
     api_info: &ApiInfo,
-) -> Result<SplitStream<WssStream>, tungstenite::Error> {
+) -> Result<(SplitStream<WssStream>, SplitSink<WssStream, Message>), tungstenite::Error> {
     let (socket, _response) = connect_async(url).await.expect("Can't connect");
 
     let (mut writer, reader) = socket.split();
@@ -107,5 +121,5 @@ async fn connect_and_authorize(
             r#"{ "action": "listen", "data": { "streams": ["trade_updates"] } }"#.into(),
         ))
         .await?;
-    Ok(reader)
+    Ok((reader, writer))
 }
